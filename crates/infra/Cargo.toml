@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
-tantivy = "0.22"
+tantivy = "0.25"
 thiserror = "1"
 
 inkstone-core = { path = "../core" }

@@ -2,10 +2,13 @@ use std::path::Path;
 
 use chrono::{DateTime, NaiveDateTime, Utc};
 use inkstone_core::domain::search::{SearchDocument, SearchHit, SearchQuery, SearchResult};
+use std::ops::Bound;
 use tantivy::collector::{Count, TopDocs};
 use tantivy::query::{AllQuery, BooleanQuery, Occur, Query, QueryParser, RangeQuery, TermQuery};
-use tantivy::schema::{Field, IndexRecordOption, Schema, SchemaBuilder, FAST, STORED, STRING, TEXT};
-use tantivy::{Document, Index, IndexReader, ReloadPolicy, Term};
+use tantivy::schema::{
+    Field, IndexRecordOption, Schema, SchemaBuilder, Value, FAST, STORED, STRING, TEXT,
+};
+use tantivy::{Index, IndexReader, ReloadPolicy, TantivyDocument, Term};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -59,7 +62,7 @@ impl SearchIndex {
         let fields = SearchFields::from_schema(&schema)?;
         let reader = index
             .reader_builder()
-            .reload_policy(ReloadPolicy::OnCommit)
+            .reload_policy(ReloadPolicy::OnCommitWithDelay)
             .try_into()?;
         Ok(Self {
             index,
@@ -84,7 +87,7 @@ impl SearchIndex {
 
         let mut hits = Vec::new();
         for (_, address) in docs.into_iter().skip(offset).take(limit) {
-            let doc = searcher.doc(address)?;
+            let doc: TantivyDocument = searcher.doc(address)?;
             hits.push(self.document_to_hit(&doc)?);
         }
 
@@ -99,14 +102,14 @@ impl SearchIndex {
         let Some((_, address)) = docs.into_iter().next() else {
             return Ok(None);
         };
-        let doc = searcher.doc(address)?;
+        let doc: TantivyDocument = searcher.doc(address)?;
         let checksum = get_string(&doc, self.fields.checksum)
             .ok_or(SearchIndexError::MissingValue("checksum"))?;
         Ok(Some(checksum))
     }
 
     pub fn upsert_documents(&self, documents: &[SearchDocument]) -> Result<(), SearchIndexError> {
-        let mut writer = self.index.writer(50_000_000)?;
+        let mut writer = self.index.writer::<TantivyDocument>(50_000_000)?;
         for doc in documents {
             writer.delete_term(Term::from_field_text(self.fields.id, &doc.id));
             writer.add_document(self.domain_to_document(doc))?;
@@ -117,15 +120,15 @@ impl SearchIndex {
     }
 
     pub fn delete_all(&self) -> Result<(), SearchIndexError> {
-        let mut writer = self.index.writer(50_000_000)?;
+        let mut writer = self.index.writer::<TantivyDocument>(50_000_000)?;
         writer.delete_all_documents()?;
         writer.commit()?;
         self.reader.reload()?;
         Ok(())
     }
 
-    fn domain_to_document(&self, doc: &SearchDocument) -> Document {
-        let mut document = Document::default();
+    fn domain_to_document(&self, doc: &SearchDocument) -> TantivyDocument {
+        let mut document = TantivyDocument::default();
         document.add_text(self.fields.id, &doc.id);
         document.add_text(self.fields.title, &doc.title);
         if let Some(summary) = &doc.summary {
@@ -145,7 +148,7 @@ impl SearchIndex {
         document
     }
 
-    fn document_to_hit(&self, doc: &Document) -> Result<SearchHit, SearchIndexError> {
+    fn document_to_hit(&self, doc: &TantivyDocument) -> Result<SearchHit, SearchIndexError> {
         let id = get_string(doc, self.fields.id).ok_or(SearchIndexError::MissingValue("id"))?;
         let title = get_string(doc, self.fields.title).ok_or(SearchIndexError::MissingValue("title"))?;
         let summary = get_string(doc, self.fields.summary);
@@ -173,32 +176,36 @@ impl SearchIndex {
 impl SearchFields {
     fn from_schema(schema: &Schema) -> Result<Self, SearchIndexError> {
         Ok(Self {
-            id: schema.get_field("id").ok_or(SearchIndexError::MissingField("id"))?,
+            id: schema
+                .get_field("id")
+                .map_err(|_| SearchIndexError::MissingField("id"))?,
             title: schema
                 .get_field("title")
-                .ok_or(SearchIndexError::MissingField("title"))?,
+                .map_err(|_| SearchIndexError::MissingField("title"))?,
             summary: schema
                 .get_field("summary")
-                .ok_or(SearchIndexError::MissingField("summary"))?,
+                .map_err(|_| SearchIndexError::MissingField("summary"))?,
             content: schema
                 .get_field("content")
-                .ok_or(SearchIndexError::MissingField("content"))?,
-            url: schema.get_field("url").ok_or(SearchIndexError::MissingField("url"))?,
+                .map_err(|_| SearchIndexError::MissingField("content"))?,
+            url: schema
+                .get_field("url")
+                .map_err(|_| SearchIndexError::MissingField("url"))?,
             tags: schema
                 .get_field("tags")
-                .ok_or(SearchIndexError::MissingField("tags"))?,
+                .map_err(|_| SearchIndexError::MissingField("tags"))?,
             category: schema
                 .get_field("category")
-                .ok_or(SearchIndexError::MissingField("category"))?,
+                .map_err(|_| SearchIndexError::MissingField("category"))?,
             published: schema
                 .get_field("published")
-                .ok_or(SearchIndexError::MissingField("published"))?,
+                .map_err(|_| SearchIndexError::MissingField("published"))?,
             updated: schema
                 .get_field("updated")
-                .ok_or(SearchIndexError::MissingField("updated"))?,
+                .map_err(|_| SearchIndexError::MissingField("updated"))?,
             checksum: schema
                 .get_field("checksum")
-                .ok_or(SearchIndexError::MissingField("checksum"))?,
+                .map_err(|_| SearchIndexError::MissingField("checksum"))?,
         })
     }
 }
@@ -249,9 +256,18 @@ fn build_query(
     if let Some(range) = &query.range {
         let (start, end) = range.to_timestamp_bounds();
         let range_query: Box<dyn Query> = match (start, end) {
-            (Some(start), Some(end)) => Box::new(RangeQuery::new_i64(fields.published, start..=end)),
-            (Some(start), None) => Box::new(RangeQuery::new_i64(fields.published, start..)),
-            (None, Some(end)) => Box::new(RangeQuery::new_i64(fields.published, ..=end)),
+            (Some(start), Some(end)) => Box::new(RangeQuery::new(
+                Bound::Included(Term::from_field_i64(fields.published, start)),
+                Bound::Included(Term::from_field_i64(fields.published, end)),
+            )),
+            (Some(start), None) => Box::new(RangeQuery::new(
+                Bound::Included(Term::from_field_i64(fields.published, start)),
+                Bound::Unbounded,
+            )),
+            (None, Some(end)) => Box::new(RangeQuery::new(
+                Bound::Unbounded,
+                Bound::Included(Term::from_field_i64(fields.published, end)),
+            )),
             (None, None) => Box::new(AllQuery),
         };
         clauses.push((Occur::Must, range_query));
@@ -264,17 +280,17 @@ fn build_query(
     }
 }
 
-fn get_string(doc: &Document, field: Field) -> Option<String> {
+fn get_string(doc: &TantivyDocument, field: Field) -> Option<String> {
     doc.get_first(field)?.as_str().map(|val| val.to_string())
 }
 
-fn get_strings(doc: &Document, field: Field) -> Vec<String> {
+fn get_strings(doc: &TantivyDocument, field: Field) -> Vec<String> {
     doc.get_all(field)
         .filter_map(|value| value.as_str().map(|text| text.to_string()))
         .collect()
 }
 
-fn get_i64(doc: &Document, field: Field) -> Option<i64> {
+fn get_i64(doc: &TantivyDocument, field: Field) -> Option<i64> {
     doc.get_first(field)?.as_i64()
 }
 
