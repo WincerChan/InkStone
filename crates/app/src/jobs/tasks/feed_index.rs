@@ -340,25 +340,38 @@ fn entry_to_document(entry: &AtomEntry) -> Result<SearchDocument, EntryError> {
         .unwrap_or("");
     let content = strip_html_tags(content_raw).trim().to_string();
 
+    let (category, category_term) = entry.categories.first().map_or((None, None), |category| {
+        let label = category.label.as_deref().unwrap_or("").trim();
+        if !label.is_empty() {
+            return (Some(label.to_string()), category.term.as_deref());
+        }
+        let term = category.term.as_deref().unwrap_or("").trim();
+        if term.is_empty() {
+            (None, None)
+        } else {
+            (Some(term.to_string()), Some(term))
+        }
+    });
     let tags: Vec<String> = entry
         .categories
         .iter()
         .filter_map(|category| category.term.as_ref())
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+        .filter(|value| {
+            if let Some(term) = category_term {
+                if value == term {
+                    return false;
+                }
+            }
+            if let Some(category) = category.as_deref() {
+                if value == category {
+                    return false;
+                }
+            }
+            true
+        })
         .collect();
-    let category = entry.categories.first().and_then(|category| {
-        let label = category.label.as_deref().unwrap_or("").trim();
-        if !label.is_empty() {
-            return Some(label.to_string());
-        }
-        let term = category.term.as_deref().unwrap_or("").trim();
-        if term.is_empty() {
-            None
-        } else {
-            Some(term.to_string())
-        }
-    });
 
     let checksum = compute_checksum(
         &entry.id,
@@ -445,4 +458,60 @@ fn strip_html_tags(input: &str) -> String {
         }
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{entry_to_document, AtomCategory, AtomEntry};
+
+    fn base_entry() -> AtomEntry {
+        AtomEntry {
+            id: "urn:uuid:1234".to_string(),
+            title: Some("Title".to_string()),
+            link: Some("https://example.com/post".to_string()),
+            published: Some("2025-01-01T00:00:00Z".to_string()),
+            updated: None,
+            summary: None,
+            content: None,
+            categories: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn category_term_is_not_in_tags() {
+        let mut entry = base_entry();
+        entry.categories = vec![
+            AtomCategory {
+                term: Some("category".to_string()),
+                label: None,
+            },
+            AtomCategory {
+                term: Some("tag1".to_string()),
+                label: None,
+            },
+        ];
+
+        let doc = entry_to_document(&entry).unwrap();
+        assert_eq!(doc.category, Some("category".to_string()));
+        assert_eq!(doc.tags, vec!["tag1".to_string()]);
+    }
+
+    #[test]
+    fn category_label_excludes_first_term() {
+        let mut entry = base_entry();
+        entry.categories = vec![
+            AtomCategory {
+                term: Some("category-term".to_string()),
+                label: Some("Category".to_string()),
+            },
+            AtomCategory {
+                term: Some("tag1".to_string()),
+                label: None,
+            },
+        ];
+
+        let doc = entry_to_document(&entry).unwrap();
+        assert_eq!(doc.category, Some("Category".to_string()));
+        assert_eq!(doc.tags, vec!["tag1".to_string()]);
+    }
 }
