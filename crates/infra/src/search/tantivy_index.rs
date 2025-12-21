@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, Utc};
 use inkstone_core::domain::search::{SearchDocument, SearchHit, SearchQuery, SearchResult};
 use std::ops::Bound;
 use tantivy::collector::{Count, TopDocs};
@@ -295,8 +295,5 @@ fn get_i64(doc: &TantivyDocument, field: Field) -> Option<i64> {
 }
 
 fn timestamp_to_datetime(ts: i64, field: &'static str) -> Result<DateTime<Utc>, SearchIndexError> {
-    let Some(naive) = NaiveDateTime::from_timestamp_opt(ts, 0) else {
-        return Err(SearchIndexError::InvalidTimestamp(field));
-    };
-    Ok(DateTime::<Utc>::from_utc(naive, Utc))
+    DateTime::<Utc>::from_timestamp(ts, 0).ok_or(SearchIndexError::InvalidTimestamp(field))
 }
