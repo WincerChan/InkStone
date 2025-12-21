@@ -11,7 +11,7 @@ pub enum JobError {
     #[error("http error: {0}")]
     Http(#[from] reqwest::Error),
     #[error("feed parse error: {0}")]
-    Feed(#[from] feed_rs::parser::ParseFeedError),
+    Feed(String),
     #[error("search index error: {0}")]
     Search(#[from] inkstone_infra::search::SearchIndexError),
     #[error("io error: {0}")]

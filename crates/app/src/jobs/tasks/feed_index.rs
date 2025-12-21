@@ -1,7 +1,8 @@
 use std::io::Cursor;
 
 use chrono::{DateTime, Utc};
-use feed_rs::model::Entry;
+use quick_xml::events::{BytesStart, Event};
+use quick_xml::Reader;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tracing::warn;
@@ -28,6 +29,36 @@ enum EntryError {
     MissingLink,
     #[error("missing entry timestamps")]
     MissingTimestamps,
+    #[error("invalid entry timestamp: {0}")]
+    InvalidTimestamp(String),
+}
+
+#[derive(Debug, Default)]
+struct AtomEntry {
+    id: String,
+    title: Option<String>,
+    link: Option<String>,
+    published: Option<String>,
+    updated: Option<String>,
+    summary: Option<String>,
+    content: Option<String>,
+    categories: Vec<AtomCategory>,
+}
+
+#[derive(Debug)]
+struct AtomCategory {
+    term: Option<String>,
+    label: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum TextTarget {
+    Title,
+    Id,
+    Published,
+    Updated,
+    Summary,
+    Content,
 }
 
 pub async fn run(state: &AppState, rebuild: bool) -> Result<JobStats, JobError> {
@@ -38,7 +69,7 @@ pub async fn run(state: &AppState, rebuild: bool) -> Result<JobStats, JobError> 
         .await?
         .error_for_status()?;
     let body = response.bytes().await?;
-    let feed = feed_rs::parser::parse(Cursor::new(body))?;
+    let entries = parse_feed_entries(&body).map_err(|err| JobError::Feed(err.to_string()))?;
 
     if rebuild {
         state.search.delete_all()?;
@@ -52,7 +83,7 @@ pub async fn run(state: &AppState, rebuild: bool) -> Result<JobStats, JobError> 
     };
 
     let mut to_index = Vec::new();
-    for entry in feed.entries {
+    for entry in entries {
         stats.fetched += 1;
         match entry_to_document(&entry) {
             Ok(doc) => {
@@ -81,58 +112,247 @@ pub async fn run(state: &AppState, rebuild: bool) -> Result<JobStats, JobError> 
     Ok(stats)
 }
 
-fn entry_to_document(entry: &Entry) -> Result<SearchDocument, EntryError> {
+fn parse_feed_entries(xml: &[u8]) -> Result<Vec<AtomEntry>, quick_xml::Error> {
+    let mut reader = Reader::from_reader(Cursor::new(xml));
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut entries = Vec::new();
+    let mut current: Option<AtomEntry> = None;
+    let mut text_target: Option<TextTarget> = None;
+    let mut text_buffer = String::new();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(event) => {
+                let name = event.name();
+                if name.as_ref() == b"entry" {
+                    current = Some(AtomEntry::default());
+                } else if let Some(entry) = current.as_mut() {
+                    handle_start_event(
+                        name.as_ref(),
+                        &event,
+                        entry,
+                        &mut text_target,
+                        &mut text_buffer,
+                    )?;
+                }
+            }
+            Event::Empty(event) => {
+                if let Some(entry) = current.as_mut() {
+                    handle_empty_event(event.name().as_ref(), &event, entry)?;
+                }
+            }
+            Event::Text(text) => {
+                if text_target.is_some() {
+                    text_buffer.push_str(&text.decode()?.into_owned());
+                }
+            }
+            Event::CData(text) => {
+                if text_target.is_some() {
+                    text_buffer.push_str(&text.decode()?.into_owned());
+                }
+            }
+            Event::End(event) => {
+                let name = event.name();
+                if name.as_ref() == b"entry" {
+                    if let Some(entry) = current.take() {
+                        entries.push(entry);
+                    }
+                } else if let Some(target) = text_target {
+                    if target.matches(name.as_ref()) {
+                        if let Some(entry) = current.as_mut() {
+                            assign_text(entry, target, &text_buffer);
+                        }
+                        text_buffer.clear();
+                        text_target = None;
+                    }
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(entries)
+}
+
+fn handle_start_event(
+    name: &[u8],
+    event: &BytesStart<'_>,
+    entry: &mut AtomEntry,
+    text_target: &mut Option<TextTarget>,
+    text_buffer: &mut String,
+) -> Result<(), quick_xml::Error> {
+    if name == b"link" {
+        parse_link_attrs(event, entry)?;
+    } else if name == b"category" {
+        parse_category_attrs(event, entry)?;
+    }
+
+    if text_target.is_none() {
+        if let Some(target) = TextTarget::from_name(name) {
+            *text_target = Some(target);
+            text_buffer.clear();
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_empty_event(
+    name: &[u8],
+    event: &BytesStart<'_>,
+    entry: &mut AtomEntry,
+) -> Result<(), quick_xml::Error> {
+    if name == b"link" {
+        parse_link_attrs(event, entry)?;
+    } else if name == b"category" {
+        parse_category_attrs(event, entry)?;
+    }
+    Ok(())
+}
+
+fn parse_link_attrs(event: &BytesStart<'_>, entry: &mut AtomEntry) -> Result<(), quick_xml::Error> {
+    let mut href = None;
+    let mut rel = None;
+    for attr in event.attributes() {
+        let attr = attr?;
+        match attr.key.as_ref() {
+            b"href" => href = Some(attr.unescape_value()?.to_string()),
+            b"rel" => rel = Some(attr.unescape_value()?.to_string()),
+            _ => {}
+        }
+    }
+
+    if let Some(href) = href {
+        let rel_alt = rel.as_deref() == Some("alternate");
+        if entry.link.is_none() || rel_alt {
+            entry.link = Some(href);
+        }
+    }
+    Ok(())
+}
+
+fn parse_category_attrs(
+    event: &BytesStart<'_>,
+    entry: &mut AtomEntry,
+) -> Result<(), quick_xml::Error> {
+    let mut term = None;
+    let mut label = None;
+    for attr in event.attributes() {
+        let attr = attr?;
+        match attr.key.as_ref() {
+            b"term" => term = Some(attr.unescape_value()?.to_string()),
+            b"label" => label = Some(attr.unescape_value()?.to_string()),
+            _ => {}
+        }
+    }
+
+    let term = term.map(|value| value.trim().to_string()).filter(|value| !value.is_empty());
+    let label = label.map(|value| value.trim().to_string()).filter(|value| !value.is_empty());
+    if term.is_some() || label.is_some() {
+        entry.categories.push(AtomCategory { term, label });
+    }
+    Ok(())
+}
+
+fn assign_text(entry: &mut AtomEntry, target: TextTarget, value: &str) {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    match target {
+        TextTarget::Title => entry.title = Some(trimmed.to_string()),
+        TextTarget::Id => entry.id = trimmed.to_string(),
+        TextTarget::Published => entry.published = Some(trimmed.to_string()),
+        TextTarget::Updated => entry.updated = Some(trimmed.to_string()),
+        TextTarget::Summary => entry.summary = Some(trimmed.to_string()),
+        TextTarget::Content => entry.content = Some(trimmed.to_string()),
+    }
+}
+
+impl TextTarget {
+    fn from_name(name: &[u8]) -> Option<Self> {
+        match name {
+            b"title" => Some(TextTarget::Title),
+            b"id" => Some(TextTarget::Id),
+            b"published" => Some(TextTarget::Published),
+            b"updated" => Some(TextTarget::Updated),
+            b"summary" => Some(TextTarget::Summary),
+            b"content" => Some(TextTarget::Content),
+            _ => None,
+        }
+    }
+
+    fn matches(self, name: &[u8]) -> bool {
+        match self {
+            TextTarget::Title => name == b"title",
+            TextTarget::Id => name == b"id",
+            TextTarget::Published => name == b"published",
+            TextTarget::Updated => name == b"updated",
+            TextTarget::Summary => name == b"summary",
+            TextTarget::Content => name == b"content",
+        }
+    }
+}
+
+fn entry_to_document(entry: &AtomEntry) -> Result<SearchDocument, EntryError> {
     if entry.id.trim().is_empty() {
         return Err(EntryError::MissingId);
     }
     let title = entry
         .title
         .as_ref()
-        .map(|text| text.content.trim().to_string())
+        .map(|text| text.trim().to_string())
         .filter(|text| !text.is_empty())
         .ok_or(EntryError::MissingTitle)?;
 
-    let url = find_link(entry).ok_or(EntryError::MissingLink)?;
+    let url = entry
+        .link
+        .as_ref()
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
+        .ok_or(EntryError::MissingLink)?;
 
-    let published_at_fixed = entry
+    let published_raw = entry
         .published
-        .or(entry.updated)
+        .as_deref()
+        .or(entry.updated.as_deref())
         .ok_or(EntryError::MissingTimestamps)?;
-    let updated_at_fixed = entry.updated.unwrap_or(published_at_fixed);
-    let published_at = published_at_fixed.with_timezone(&Utc);
-    let updated_at = updated_at_fixed.with_timezone(&Utc);
+    let published_at = parse_datetime(published_raw)?;
+    let updated_at = entry
+        .updated
+        .as_deref()
+        .map(parse_datetime)
+        .transpose()?
+        .unwrap_or(published_at);
 
     let summary = entry
         .summary
         .as_ref()
-        .map(|text| text.content.trim().to_string())
+        .map(|text| text.trim().to_string())
         .filter(|text| !text.is_empty());
     let content_raw = entry
         .content
-        .as_ref()
-        .and_then(|content| content.body.as_deref())
-        .or_else(|| entry.summary.as_ref().map(|text| text.content.as_str()))
-        .unwrap_or_default();
+        .as_deref()
+        .or(summary.as_deref())
+        .unwrap_or("");
     let content = strip_html_tags(content_raw).trim().to_string();
 
     let tags: Vec<String> = entry
         .categories
         .iter()
-        .filter_map(|category| {
-            let term = category.term.trim();
-            if term.is_empty() {
-                None
-            } else {
-                Some(term.to_string())
-            }
-        })
+        .filter_map(|category| category.term.as_ref())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
         .collect();
     let category = entry.categories.first().and_then(|category| {
         let label = category.label.as_deref().unwrap_or("").trim();
         if !label.is_empty() {
             return Some(label.to_string());
         }
-        let term = category.term.trim();
+        let term = category.term.as_deref().unwrap_or("").trim();
         if term.is_empty() {
             None
         } else {
@@ -166,20 +386,14 @@ fn entry_to_document(entry: &Entry) -> Result<SearchDocument, EntryError> {
     })
 }
 
-fn find_link(entry: &Entry) -> Option<String> {
-    entry
-        .links
-        .iter()
-        .find(|link| link.rel.as_deref() == Some("alternate"))
-        .or_else(|| entry.links.first())
-        .and_then(|link| {
-            let href = link.href.trim();
-            if href.is_empty() {
-                None
-            } else {
-                Some(href.to_string())
-            }
-        })
+fn parse_datetime(value: &str) -> Result<DateTime<Utc>, EntryError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(EntryError::MissingTimestamps);
+    }
+    let parsed = DateTime::parse_from_rfc3339(trimmed)
+        .map_err(|_| EntryError::InvalidTimestamp(trimmed.to_string()))?;
+    Ok(parsed.with_timezone(&Utc))
 }
 
 fn compute_checksum(
