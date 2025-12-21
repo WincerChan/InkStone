@@ -1,0 +1,22 @@
+[package]
+name = "inkstone-app"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = "0.7"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+feed-rs = "1"
+hex = "0.4"
+reqwest = { version = "0.12", features = ["rustls-tls", "gzip", "brotli", "deflate"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+inkstone-core = { path = "../core" }
+inkstone-infra = { path = "../infra" }

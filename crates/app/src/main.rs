@@ -1,0 +1,113 @@
+mod cli;
+mod config;
+mod http;
+mod jobs;
+mod state;
+mod wiring;
+
+use clap::Parser;
+use thiserror::Error;
+use tracing::{error, info};
+use tracing_subscriber::EnvFilter;
+
+use crate::cli::Cli;
+use crate::config::ConfigError;
+use crate::http::HttpError;
+use crate::jobs::JobError;
+use crate::wiring::WiringError;
+
+#[derive(Debug, Error)]
+pub enum AppError {
+    #[error("config error: {0}")]
+    Config(#[from] ConfigError),
+    #[error("wiring error: {0}")]
+    Wiring(#[from] WiringError),
+    #[error("http error: {0}")]
+    Http(#[from] HttpError),
+    #[error("job error: {0}")]
+    Jobs(#[from] JobError),
+    #[error("task join error: {0}")]
+    Join(#[from] tokio::task::JoinError),
+}
+
+#[tokio::main]
+async fn main() -> Result<(), AppError> {
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    tracing_subscriber::fmt().with_env_filter(env_filter).init();
+
+    let cli = Cli::parse();
+    let config = config::AppConfig::from_env()?;
+    let state = wiring::build_state(config)?;
+
+    let mut api_task = None;
+    let mut worker_task = None;
+
+    if cli.mode.run_api() {
+        let addr = state.config.http_addr;
+        let http_state = state.clone();
+        api_task = Some(tokio::spawn(async move {
+            info!(%addr, "http server starting");
+            http::serve(addr, http_state).await
+        }));
+    }
+
+    if cli.mode.run_worker() {
+        let worker_state = state.clone();
+        worker_task = Some(tokio::spawn(async move {
+            info!("worker scheduler starting");
+            jobs::start(worker_state, cli.rebuild).await
+        }));
+    }
+
+    if api_task.is_none() && worker_task.is_none() {
+        info!("no mode selected; exiting");
+        return Ok(());
+    }
+
+    let shutdown = shutdown_signal();
+
+    match (api_task, worker_task) {
+        (Some(api), Some(worker)) => {
+            tokio::select! {
+                _ = shutdown => {
+                    info!("shutdown signal received");
+                }
+                res = api => {
+                    res??;
+                }
+                res = worker => {
+                    res??;
+                }
+            }
+        }
+        (Some(api), None) => {
+            tokio::select! {
+                _ = shutdown => {
+                    info!("shutdown signal received");
+                }
+                res = api => {
+                    res??;
+                }
+            }
+        }
+        (None, Some(worker)) => {
+            tokio::select! {
+                _ = shutdown => {
+                    info!("shutdown signal received");
+                }
+                res = worker => {
+                    res??;
+                }
+            }
+        }
+        (None, None) => {}
+    }
+
+    Ok(())
+}
+
+async fn shutdown_signal() {
+    if let Err(err) = tokio::signal::ctrl_c().await {
+        error!(error = %err, "failed to install ctrl-c handler");
+    }
+}
