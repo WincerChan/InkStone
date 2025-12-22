@@ -182,19 +182,9 @@ impl SearchIndex {
 
         Ok(SearchHit {
             id,
-            title,
-            title_snippet: snippet_or_excerpt(
-                title_snippet,
-                doc,
-                self.fields.title,
-                350,
-            ),
-            content_snippet: snippet_or_excerpt(
-                content_snippet,
-                doc,
-                self.fields.content,
-                350,
-            ),
+            title: snippet_or_excerpt(title_snippet, doc, self.fields.title, 350)
+                .unwrap_or(title),
+            content: snippet_or_excerpt(content_snippet, doc, self.fields.content, 350),
             url,
             tags,
             category,

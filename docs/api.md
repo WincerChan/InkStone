@@ -50,9 +50,8 @@ curl "http://127.0.0.1:8080/search?q=Python%20range:2020-01-01~%20tags:Rust"
   "hits": [
     {
       "id": "urn:uuid:...",
-      "title": "Example",
-      "title_snippet": "<b>Example</b> title snippet",
-      "content_snippet": "<b>Example</b> content snippet",
+      "title": "<b>Example</b> title snippet",
+      "content": "<b>Example</b> content snippet",
       "url": "https://blog.example.com/posts/example",
       "tags": ["Rust", "Search"],
       "category": "share",
@@ -64,7 +63,7 @@ curl "http://127.0.0.1:8080/search?q=Python%20range:2020-01-01~%20tags:Rust"
 ```
 
 Notes:
-- `title_snippet` and `content_snippet` are optional and only generated for keyword queries.
+- `title` and `content` contain highlighted snippets for keyword queries; `content` may be null when正文为空。
 
 ### Error responses
 

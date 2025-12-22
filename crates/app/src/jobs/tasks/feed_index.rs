@@ -1,7 +1,7 @@
 use std::io::Cursor;
 
 use chrono::{DateTime, Utc};
-use quick_xml::events::{BytesStart, Event};
+use quick_xml::events::{BytesRef, BytesStart, Event};
 use quick_xml::Reader;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -137,13 +137,26 @@ fn parse_feed_entries(xml: &[u8]) -> Result<Vec<AtomEntry>, quick_xml::Error> {
                 }
             }
             Event::Text(text) => {
+                if let Some(target) = text_target {
+                    let chunk = match target {
+                        TextTarget::Content => String::from_utf8_lossy(text.as_ref()).into_owned(),
+                        _ => text.decode()?.into_owned(),
+                    };
+                    text_buffer.push_str(&chunk);
+                }
+            }
+            Event::GeneralRef(reference) => {
                 if text_target.is_some() {
-                    text_buffer.push_str(&text.decode()?.into_owned());
+                    append_general_ref(&reference, &mut text_buffer)?;
                 }
             }
             Event::CData(text) => {
-                if text_target.is_some() {
-                    text_buffer.push_str(&text.decode()?.into_owned());
+                if let Some(target) = text_target {
+                    let chunk = match target {
+                        TextTarget::Content => String::from_utf8_lossy(text.as_ref()).into_owned(),
+                        _ => text.decode()?.into_owned(),
+                    };
+                    text_buffer.push_str(&chunk);
                 }
             }
             Event::End(event) => {
@@ -262,6 +275,32 @@ fn assign_text(entry: &mut AtomEntry, target: TextTarget, value: &str) {
         TextTarget::Updated => entry.updated = Some(trimmed.to_string()),
         TextTarget::Content => entry.content = Some(trimmed.to_string()),
     }
+}
+
+fn append_general_ref(
+    reference: &BytesRef<'_>,
+    text_buffer: &mut String,
+) -> Result<(), quick_xml::Error> {
+    if let Some(ch) = reference.resolve_char_ref()? {
+        text_buffer.push(ch);
+        return Ok(());
+    }
+
+    let name = reference.decode()?;
+    match name.as_ref() {
+        "lt" => text_buffer.push('<'),
+        "gt" => text_buffer.push('>'),
+        "amp" => text_buffer.push('&'),
+        "quot" => text_buffer.push('"'),
+        "apos" => text_buffer.push('\''),
+        "nbsp" => text_buffer.push(' '),
+        _ => {
+            text_buffer.push('&');
+            text_buffer.push_str(name.as_ref());
+            text_buffer.push(';');
+        }
+    }
+    Ok(())
 }
 
 impl TextTarget {
@@ -416,6 +455,15 @@ fn compute_checksum(
 }
 
 fn strip_html_tags(input: &str) -> String {
+    let mut text = input.to_string();
+    for _ in 0..2 {
+        let decoded = decode_html_entities(&text);
+        text = remove_html_tags(&decoded);
+    }
+    decode_html_entities(&text)
+}
+
+fn remove_html_tags(input: &str) -> String {
     let mut output = String::with_capacity(input.len());
     let mut in_tag = false;
     for ch in input.chars() {
@@ -432,9 +480,71 @@ fn strip_html_tags(input: &str) -> String {
     output
 }
 
+fn decode_html_entities(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '&' {
+            output.push(ch);
+            continue;
+        }
+
+        let mut entity = String::new();
+        let mut valid = false;
+        while let Some(&next) = chars.peek() {
+            if next == ';' {
+                chars.next();
+                valid = true;
+                break;
+            }
+            if next.is_whitespace() || entity.len() > 32 {
+                break;
+            }
+            chars.next();
+            entity.push(next);
+        }
+
+        if !valid || entity.is_empty() {
+            output.push('&');
+            if !entity.is_empty() {
+                output.push_str(&entity);
+            }
+            continue;
+        }
+
+        match entity.as_str() {
+            "amp" => output.push('&'),
+            "lt" => output.push('<'),
+            "gt" => output.push('>'),
+            "quot" => output.push('"'),
+            "apos" => output.push('\''),
+            "nbsp" => output.push(' '),
+            _ => {
+                if let Some(decoded) = decode_numeric_entity(&entity) {
+                    output.push(decoded);
+                } else {
+                    output.push('&');
+                    output.push_str(&entity);
+                    output.push(';');
+                }
+            }
+        }
+    }
+    output
+}
+
+fn decode_numeric_entity(entity: &str) -> Option<char> {
+    let trimmed = entity.strip_prefix('#')?;
+    if let Some(hex) = trimmed.strip_prefix(['x', 'X']) {
+        u32::from_str_radix(hex, 16).ok().and_then(char::from_u32)
+    } else {
+        trimmed.parse::<u32>().ok().and_then(char::from_u32)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{entry_to_document, AtomCategory, AtomEntry};
+    use super::{entry_to_document, parse_feed_entries, AtomCategory, AtomEntry};
 
     fn base_entry() -> AtomEntry {
         AtomEntry {
@@ -499,5 +609,70 @@ mod tests {
         let entry = base_entry();
         let doc = entry_to_document(&entry).unwrap();
         assert_eq!(doc.id, "https://example.com/post");
+    }
+
+    #[test]
+    fn content_strips_html_and_decodes_entities() {
+        let mut entry = base_entry();
+        entry.content = Some("&lt;p&gt;Tom &amp; Jerry &quot;show&quot;&lt;/p&gt;".to_string());
+
+        let doc = entry_to_document(&entry).unwrap();
+        assert_eq!(doc.content, "Tom & Jerry \"show\"");
+    }
+
+    #[test]
+    fn content_strips_double_encoded_html() {
+        let mut entry = base_entry();
+        entry.content = Some(
+            "&amp;lt;del&amp;gt;我爱你&amp;lt;/del&amp;gt;".to_string(),
+        );
+
+        let doc = entry_to_document(&entry).unwrap();
+        assert_eq!(doc.content, "我爱你");
+    }
+
+    #[test]
+    fn content_from_atom_is_decoded_and_stripped() {
+        let xml = r#"
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Example</title>
+    <link rel="alternate" type="text/html" href="https://example.com/post" />
+    <id>urn:uuid:1234</id>
+    <published>2025-01-01T00:00:00Z</published>
+    <updated>2025-01-02T00:00:00Z</updated>
+    <content type="html">&lt;p&gt;&lt;img src="https://img13.360buyimg.com/ddimg/jfs/t1/256238/30/29757/30939/67c95492F0a2613af/29d8241f4de5174e.jpg" alt="cover" /&gt;&lt;/p&gt;&lt;p&gt;好久没在&lt;a href="/category/%E6%96%87%E5%AD%97%E9%98%81/"&gt;文字阁&lt;/a&gt;分类里发文了&lt;del&gt;这当然不是因为我好久没读书了&lt;/del&gt;。&lt;/p&gt;</content>
+  </entry>
+</feed>
+"#;
+        let entries = parse_feed_entries(xml.as_bytes()).unwrap();
+        let raw = entries[0].content.as_deref().unwrap_or("");
+        assert!(
+            raw.contains('<') || raw.contains("&lt;"),
+            "raw content missing tag markers: {}",
+            raw
+        );
+        let doc = entry_to_document(&entries[0]).unwrap();
+        let normalized = normalize_space(&doc.content);
+        assert!(normalized.contains("好久没在"));
+        assert!(normalized.contains("文字阁"));
+        assert!(normalized.contains("这当然不是因为我好久没读书了"));
+        assert!(
+            !doc.content.contains("pimg"),
+            "content still has tag text: {}",
+            doc.content
+        );
+        assert!(!doc.content.contains("href"));
+        assert!(!doc.content.contains("del"));
+        assert!(!doc.content.contains('<'));
+        assert!(!doc.content.contains('>'));
+    }
+
+    fn normalize_space(input: &str) -> String {
+        input
+            .split_whitespace()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 }

@@ -28,8 +28,7 @@ pub struct SearchDocument {
 pub struct SearchHit {
     pub id: String,
     pub title: String,
-    pub title_snippet: Option<String>,
-    pub content_snippet: Option<String>,
+    pub content: Option<String>,
     pub url: String,
     pub tags: Vec<String>,
     pub category: Option<String>,
