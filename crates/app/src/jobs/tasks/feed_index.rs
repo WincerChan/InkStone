@@ -353,7 +353,7 @@ fn entry_to_document(entry: &AtomEntry) -> Result<SearchDocument, EntryError> {
         .unwrap_or(published_at);
 
     let content_raw = entry.content.as_deref().unwrap_or("");
-    let content = strip_html_tags(content_raw).trim().to_string();
+    let content = normalize_whitespace(&strip_html_tags(content_raw));
 
     let (category, category_term) = entry.categories.first().map_or((None, None), |category| {
         let label = category.label.as_deref().unwrap_or("").trim();
@@ -461,6 +461,20 @@ fn strip_html_tags(input: &str) -> String {
         text = remove_html_tags(&decoded);
     }
     decode_html_entities(&text)
+}
+
+fn normalize_whitespace(input: &str) -> String {
+    let mut parts = input.split_whitespace();
+    let Some(first) = parts.next() else {
+        return String::new();
+    };
+    let mut output = String::with_capacity(input.len());
+    output.push_str(first);
+    for part in parts {
+        output.push(' ');
+        output.push_str(part);
+    }
+    output
 }
 
 fn remove_html_tags(input: &str) -> String {

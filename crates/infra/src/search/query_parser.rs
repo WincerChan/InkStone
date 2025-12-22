@@ -2,12 +2,18 @@ use inkstone_core::domain::search::SearchQuery;
 use inkstone_core::types::time_range::TimeRange;
 use thiserror::Error;
 
+const MAX_KEYWORDS: usize = 10;
+
 #[derive(Debug, Error)]
 pub enum QueryParseError {
+    #[error("control characters are not allowed")]
+    ControlCharacter,
     #[error("empty search query")]
     EmptyQuery,
     #[error("empty search token")]
     EmptyToken,
+    #[error("too many keywords (max {0})")]
+    TooManyKeywords(usize),
     #[error("invalid range filter: {0}")]
     InvalidRange(String),
     #[error("duplicate filter: {0}")]
@@ -19,13 +25,16 @@ pub enum QueryParseError {
 }
 
 pub fn parse_query(input: &str) -> Result<SearchQuery, QueryParseError> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
+    if input.chars().any(|ch| ch.is_control()) {
+        return Err(QueryParseError::ControlCharacter);
+    }
+    let normalized = normalize_whitespace(input);
+    if normalized.is_empty() {
         return Err(QueryParseError::EmptyQuery);
     }
 
     let mut query = SearchQuery::default();
-    for token in trimmed.split_whitespace() {
+    for token in normalized.split_whitespace() {
         if token.trim().is_empty() {
             return Err(QueryParseError::EmptyToken);
         }
@@ -56,6 +65,9 @@ pub fn parse_query(input: &str) -> Result<SearchQuery, QueryParseError> {
             continue;
         }
         query.keywords.push(token.to_string());
+        if query.keywords.len() > MAX_KEYWORDS {
+            return Err(QueryParseError::TooManyKeywords(MAX_KEYWORDS));
+        }
     }
 
     Ok(query)
@@ -79,6 +91,20 @@ fn parse_list(input: &str) -> Option<Vec<String>> {
     } else {
         Some(items)
     }
+}
+
+fn normalize_whitespace(input: &str) -> String {
+    let mut parts = input.split_whitespace();
+    let Some(first) = parts.next() else {
+        return String::new();
+    };
+    let mut output = String::with_capacity(input.len());
+    output.push_str(first);
+    for part in parts {
+        output.push(' ');
+        output.push_str(part);
+    }
+    output
 }
 
 #[cfg(test)]
@@ -121,5 +147,22 @@ mod tests {
     fn parse_empty_query_returns_error() {
         let err = parse_query(" ").unwrap_err();
         assert!(matches!(err, QueryParseError::EmptyQuery));
+    }
+
+    #[test]
+    fn parse_rejects_control_characters() {
+        let err = parse_query("Python\nLinux").unwrap_err();
+        assert!(matches!(err, QueryParseError::ControlCharacter));
+    }
+
+    #[test]
+    fn parse_rejects_too_many_keywords() {
+        let query = vec![
+            "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+            "eleven",
+        ]
+        .join(" ");
+        let err = parse_query(&query).unwrap_err();
+        assert!(matches!(err, QueryParseError::TooManyKeywords(_)));
     }
 }
