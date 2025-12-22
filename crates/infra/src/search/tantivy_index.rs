@@ -4,7 +4,9 @@ use chrono::{DateTime, Utc};
 use inkstone_core::domain::search::{SearchDocument, SearchHit, SearchQuery, SearchResult};
 use std::ops::Bound;
 use tantivy::collector::{Count, TopDocs};
-use tantivy::query::{AllQuery, BooleanQuery, Occur, Query, QueryParser, RangeQuery, TermQuery};
+use tantivy::query::{
+    AllQuery, BooleanQuery, EmptyQuery, Occur, PhraseQuery, Query, RangeQuery, TermQuery,
+};
 use tantivy::schema::{
     Field, IndexRecordOption, Schema, SchemaBuilder, TextFieldIndexing, TextOptions, Value, FAST,
     STORED, STRING,
@@ -20,8 +22,8 @@ pub enum SearchIndexError {
     Io(#[from] std::io::Error),
     #[error("tantivy error: {0}")]
     Tantivy(#[from] tantivy::TantivyError),
-    #[error("query parse error: {0}")]
-    QueryParse(#[from] tantivy::query::QueryParserError),
+    #[error("missing tokenizer: {0}")]
+    MissingTokenizer(&'static str),
     #[error("missing field in schema: {0}")]
     MissingField(&'static str),
     #[error("missing stored value: {0}")]
@@ -271,15 +273,10 @@ fn build_query(
 ) -> Result<BuiltQuery, SearchIndexError> {
     let mut clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
 
-    let keyword_query = if !query.keywords.is_empty() {
-        let parser = QueryParser::for_index(index, vec![fields.title, fields.content]);
-        let query_str = query.keywords.join(" ");
-        let keyword_query = parser.parse_query(&query_str)?;
+    let keyword_query = build_keyword_query(index, fields, query)?;
+    if let Some(keyword_query) = keyword_query.as_ref() {
         clauses.push((Occur::Must, keyword_query.box_clone()));
-        Some(keyword_query)
-    } else {
-        None
-    };
+    }
 
     if !query.tags.is_empty() {
         for tag in &query.tags {
@@ -319,6 +316,84 @@ fn build_query(
 struct BuiltQuery {
     query: Box<dyn Query>,
     keyword: Option<Box<dyn Query>>,
+}
+
+fn build_keyword_query(
+    index: &Index,
+    fields: &SearchFields,
+    query: &SearchQuery,
+) -> Result<Option<Box<dyn Query>>, SearchIndexError> {
+    if query.keywords.is_empty() {
+        return Ok(None);
+    }
+    let mut analyzer = index
+        .tokenizers()
+        .get("jieba")
+        .ok_or(SearchIndexError::MissingTokenizer("jieba"))?;
+    let mut keyword_queries = Vec::new();
+    for keyword in &query.keywords {
+        let tokens = tokenize_keyword(&mut analyzer, keyword);
+        let title_query = build_field_query(fields.title, &tokens);
+        let content_query = build_field_query(fields.content, &tokens);
+        let keyword_query = match (title_query, content_query) {
+            (Some(title_query), Some(content_query)) => Some(Box::new(BooleanQuery::new(vec![
+                (Occur::Should, title_query),
+                (Occur::Should, content_query),
+            ])) as Box<dyn Query>),
+            (Some(query), None) | (None, Some(query)) => Some(query),
+            (None, None) => None,
+        };
+        if let Some(keyword_query) = keyword_query {
+            keyword_queries.push(keyword_query);
+        }
+    }
+
+    if keyword_queries.is_empty() {
+        return Ok(Some(Box::new(EmptyQuery)));
+    }
+    if keyword_queries.len() == 1 {
+        Ok(Some(keyword_queries.remove(0)))
+    } else {
+        Ok(Some(Box::new(BooleanQuery::new(
+            keyword_queries
+                .into_iter()
+                .map(|query| (Occur::Should, query))
+                .collect(),
+        ))))
+    }
+}
+
+fn tokenize_keyword(
+    analyzer: &mut TextAnalyzer,
+    keyword: &str,
+) -> Vec<(usize, String)> {
+    let mut stream = analyzer.token_stream(keyword);
+    let mut tokens = Vec::new();
+    while stream.advance() {
+        let token = stream.token();
+        if token.text.trim().is_empty() {
+            continue;
+        }
+        tokens.push((token.position, token.text.to_string()));
+    }
+    tokens
+}
+
+fn build_field_query(field: Field, tokens: &[(usize, String)]) -> Option<Box<dyn Query>> {
+    match tokens.len() {
+        0 => None,
+        1 => Some(Box::new(TermQuery::new(
+            Term::from_field_text(field, &tokens[0].1),
+            IndexRecordOption::WithFreqs,
+        ))),
+        _ => {
+            let terms = tokens
+                .iter()
+                .map(|(pos, text)| (*pos, Term::from_field_text(field, text)))
+                .collect();
+            Some(Box::new(PhraseQuery::new_with_offset(terms)))
+        }
+    }
 }
 
 fn build_range_query(field: Field, start: Option<i64>, end: Option<i64>) -> Box<dyn Query> {
@@ -392,7 +467,6 @@ mod tests {
     use super::*;
     use tantivy::collector::TopDocs;
     use tantivy::doc;
-    use tantivy::query::QueryParser;
     use tantivy::tokenizer::TokenStream;
 
     #[test]
@@ -410,18 +484,22 @@ mod tests {
         ))?;
         writer.commit()?;
 
-        let reader = index.reader()?;
-        let searcher = reader.searcher();
-        let query_parser = QueryParser::for_index(&index, vec![title, content]);
-        let query = query_parser.parse_query("售货员")?;
-        let top_docs = searcher.search(&query, &TopDocs::with_limit(5))?;
+        let fields = SearchFields::from_schema(&index.schema())?;
+        let searcher = index.reader()?.searcher();
+        let search_query = SearchQuery {
+            keywords: vec!["售货员".to_string()],
+            ..Default::default()
+        };
+        let built = build_query(&index, &fields, &search_query)?;
+        let top_docs = searcher.search(&built.query, &TopDocs::with_limit(5))?;
         assert!(!top_docs.is_empty());
         let doc_address = top_docs[0].1;
         let doc: TantivyDocument = searcher.doc(doc_address)?;
 
-        let mut title_snippet = SnippetGenerator::create(&searcher, &*query, title)?;
+        let keyword_query = built.keyword.as_ref().expect("keyword query");
+        let mut title_snippet = SnippetGenerator::create(&searcher, &**keyword_query, title)?;
         title_snippet.set_max_num_chars(350);
-        let mut content_snippet = SnippetGenerator::create(&searcher, &*query, content)?;
+        let mut content_snippet = SnippetGenerator::create(&searcher, &**keyword_query, content)?;
         content_snippet.set_max_num_chars(350);
         let title_html = title_snippet.snippet_from_doc(&doc).to_html();
         let content_html = content_snippet.snippet_from_doc(&doc).to_html();
@@ -466,11 +544,14 @@ mod tests {
         ))?;
         writer.commit()?;
 
-        let reader = index.reader()?;
-        let searcher = reader.searcher();
-        let query_parser = QueryParser::for_index(&index, vec![title, content]);
-        let query = query_parser.parse_query("三年")?;
-        let top_docs = searcher.search(&query, &TopDocs::with_limit(5))?;
+        let fields = SearchFields::from_schema(&index.schema())?;
+        let searcher = index.reader()?.searcher();
+        let search_query = SearchQuery {
+            keywords: vec!["三年".to_string()],
+            ..Default::default()
+        };
+        let built = build_query(&index, &fields, &search_query)?;
+        let top_docs = searcher.search(&built.query, &TopDocs::with_limit(5))?;
         assert!(!top_docs.is_empty());
         Ok(())
     }
@@ -490,15 +571,19 @@ mod tests {
         ))?;
         writer.commit()?;
 
-        let reader = index.reader()?;
-        let searcher = reader.searcher();
-        let query_parser = QueryParser::for_index(&index, vec![content]);
-        let query = query_parser.parse_query("正文")?;
-        let top_docs = searcher.search(&query, &TopDocs::with_limit(1))?;
+        let fields = SearchFields::from_schema(&index.schema())?;
+        let searcher = index.reader()?.searcher();
+        let search_query = SearchQuery {
+            keywords: vec!["正文".to_string()],
+            ..Default::default()
+        };
+        let built = build_query(&index, &fields, &search_query)?;
+        let top_docs = searcher.search(&built.query, &TopDocs::with_limit(1))?;
         let doc_address = top_docs[0].1;
         let doc: TantivyDocument = searcher.doc(doc_address)?;
 
-        let mut title_snippet = SnippetGenerator::create(&searcher, &*query, title)?;
+        let keyword_query = built.keyword.as_ref().expect("keyword query");
+        let mut title_snippet = SnippetGenerator::create(&searcher, &**keyword_query, title)?;
         title_snippet.set_max_num_chars(350);
         let snippet = snippet_or_excerpt(Some(&title_snippet), &doc, title, 350).unwrap();
         assert!(snippet.contains("离职"));
