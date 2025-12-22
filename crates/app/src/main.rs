@@ -15,6 +15,7 @@ use crate::config::ConfigError;
 use crate::http::HttpError;
 use crate::jobs::JobError;
 use crate::wiring::WiringError;
+use inkstone_infra::db::run_migrations;
 
 #[derive(Debug, Error)]
 pub enum AppError {
@@ -24,6 +25,8 @@ pub enum AppError {
     InvalidCli(String),
     #[error("wiring error: {0}")]
     Wiring(#[from] WiringError),
+    #[error("db error: {0}")]
+    Db(#[from] inkstone_infra::db::DbPoolError),
     #[error("http error: {0}")]
     Http(#[from] HttpError),
     #[error("job error: {0}")]
@@ -58,6 +61,9 @@ async fn main() -> Result<(), AppError> {
         }
     }
     let state = wiring::build_state(config)?;
+    if let Some(pool) = state.db.as_ref() {
+        run_migrations(pool).await?;
+    }
 
     let mut api_task = None;
     let mut worker_task = None;

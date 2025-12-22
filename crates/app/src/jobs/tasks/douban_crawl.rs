@@ -1,11 +1,15 @@
 use std::collections::HashSet;
 
+use chrono::NaiveDate;
 use scraper::{ElementRef, Html, Selector};
 use serde::Serialize;
 use tracing::{info, warn};
 
 use crate::jobs::JobError;
 use crate::state::AppState;
+use inkstone_infra::db::{
+    insert_douban_items, upsert_douban_items, DbPool, DoubanItemRecord,
+};
 
 const ITEM_LOG_LIMIT: usize = 20;
 
@@ -57,10 +61,10 @@ impl DoubanCategory {
     }
 }
 
-pub async fn run(state: &AppState) -> Result<(), JobError> {
+pub async fn run(state: &AppState, rebuild: bool) -> Result<(), JobError> {
     let uid = state.config.douban_uid.as_str();
     for category in [DoubanCategory::Movie, DoubanCategory::Book, DoubanCategory::Game] {
-        let items = fetch_all_pages(state, category, uid).await?;
+        let items = fetch_all_pages(state, category, uid, rebuild).await?;
         log_items(category, &items);
     }
     Ok(())
@@ -70,12 +74,17 @@ async fn fetch_all_pages(
     state: &AppState,
     category: DoubanCategory,
     uid: &str,
+    rebuild: bool,
 ) -> Result<Vec<DoubanItem>, JobError> {
     let mut items = Vec::new();
     let mut next_url = category.start_url(uid);
     let mut seen = HashSet::new();
     let mut pages_fetched = 0;
     let max_pages = state.config.douban_max_pages;
+    let pool = state.db.as_ref();
+    if pool.is_none() {
+        warn!(category = category.label(), "db not configured; skip douban upsert");
+    }
 
     loop {
         if !seen.insert(next_url.clone()) {
@@ -83,10 +92,18 @@ async fn fetch_all_pages(
         }
         pages_fetched += 1;
         let html = fetch_page(state, &next_url).await?;
-        let mut page_items = parse_page(&html, category);
-        items.append(&mut page_items);
+        let page_items = parse_page(&html, category);
+        let stop_on_existing = if let Some(pool) = pool {
+            sync_page(pool, category, &page_items, rebuild).await?
+        } else {
+            false
+        };
+        items.extend(page_items);
 
         if max_pages > 0 && pages_fetched >= max_pages {
+            break;
+        }
+        if stop_on_existing && !rebuild {
             break;
         }
         let next_link = extract_next_link(&html, category.base_url());
@@ -399,6 +416,79 @@ fn parse_tags_text(text: &str) -> Vec<String> {
         .collect()
 }
 
+async fn sync_page(
+    pool: &DbPool,
+    category: DoubanCategory,
+    items: &[DoubanItem],
+    rebuild: bool,
+) -> Result<bool, JobError> {
+    let records = map_items_for_db(items);
+    if records.is_empty() {
+        return Ok(false);
+    }
+
+    if rebuild {
+        let affected = upsert_douban_items(pool, &records).await?;
+        info!(category = category.label(), affected, "douban items upserted");
+        return Ok(false);
+    }
+
+    let total = records.len();
+    let inserted = insert_douban_items(pool, &records).await?;
+    info!(
+        category = category.label(),
+        inserted,
+        "douban items inserted"
+    );
+    let stop = should_stop_on_existing(inserted, total);
+    if stop {
+        info!(
+            category = category.label(),
+            "douban pagination stopped after existing item"
+        );
+    }
+    Ok(stop)
+}
+
+fn map_items_for_db(items: &[DoubanItem]) -> Vec<DoubanItemRecord> {
+    items
+        .iter()
+        .map(|item| {
+            let date = parse_date_for_record(item);
+            DoubanItemRecord {
+                id: item.id.clone(),
+                item_type: item.type_.clone(),
+                title: item.title.clone(),
+                poster: item.poster.clone(),
+                rating: item.rating.map(|value| value as i16),
+                tags: item.tags.clone(),
+                comment: item.comment.clone(),
+                date,
+            }
+        })
+        .collect()
+}
+
+fn parse_date_for_record(item: &DoubanItem) -> Option<NaiveDate> {
+    item.date
+        .as_deref()
+        .and_then(|value| parse_date(value, &item.id))
+}
+
+fn should_stop_on_existing(inserted: u64, total: usize) -> bool {
+    inserted < total as u64
+}
+
+fn parse_date(value: &str, item_id: &str) -> Option<NaiveDate> {
+    match NaiveDate::parse_from_str(value, "%Y-%m-%d") {
+        Ok(date) => Some(date),
+        Err(err) => {
+            warn!(item_id, date = value, error = %err, "douban date parse failed");
+            None
+        }
+    }
+}
+
 fn extract_next_link(html: &str, base_url: &str) -> Option<String> {
     let document = Html::parse_document(html);
     let selector = Selector::parse("link[rel=\"next\"]").expect("selector");
@@ -439,7 +529,10 @@ fn log_items(category: DoubanCategory, items: &[DoubanItem]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_book_items, parse_game_items, parse_movie_items};
+    use super::{
+        map_items_for_db, parse_book_items, parse_game_items, parse_movie_items,
+        should_stop_on_existing, DoubanItem,
+    };
 
     #[test]
     fn parse_movie_item() {
@@ -520,4 +613,27 @@ mod tests {
         assert_eq!(items[0].tags, vec!["tagA", "tagB"]);
     }
 
+    #[test]
+    fn map_items_parses_dates() {
+        let items = vec![DoubanItem {
+            id: "1".to_string(),
+            tags: vec![],
+            date: Some("2025-12-20".to_string()),
+            comment: None,
+            rating: Some(4),
+            title: "Title".to_string(),
+            type_: "movie".to_string(),
+            poster: None,
+        }];
+        let records = map_items_for_db(&items);
+        assert_eq!(records.len(), 1);
+        assert!(records[0].date.is_some());
+    }
+
+    #[test]
+    fn should_stop_on_existing_conflict() {
+        assert!(should_stop_on_existing(0, 1));
+        assert!(should_stop_on_existing(2, 3));
+        assert!(!should_stop_on_existing(3, 3));
+    }
 }

@@ -14,6 +14,8 @@ pub enum JobError {
     Feed(String),
     #[error("search index error: {0}")]
     Search(#[from] inkstone_infra::search::SearchIndexError),
+    #[error("db error: {0}")]
+    Db(#[from] inkstone_infra::db::DoubanRepoError),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -23,6 +25,8 @@ pub async fn start(state: AppState, rebuild: bool) -> Result<(), JobError> {
         info!("running feed index rebuild before scheduler");
         let stats = tasks::feed_index::run(&state, true).await?;
         info!(?stats, "rebuild complete");
+        info!("running douban crawl rebuild before scheduler");
+        tasks::douban_crawl::run(&state, true).await?;
     }
 
     let feed_interval = state.config.poll_interval;
@@ -43,7 +47,7 @@ pub async fn start(state: AppState, rebuild: bool) -> Result<(), JobError> {
     let douban_job = scheduler::run_interval("douban_crawl", douban_interval, move || {
         let state = douban_state.clone();
         async move {
-            if let Err(err) = tasks::douban_crawl::run(&state).await {
+            if let Err(err) = tasks::douban_crawl::run(&state, false).await {
                 warn!(error = %err, "douban crawl failed");
             }
             Ok(())

@@ -38,7 +38,7 @@ Run API + worker (default):
 cargo run -p inkstone-app
 ```
 
-Rebuild the search index on startup:
+Rebuild the search index and run a full Douban crawl on startup:
 
 ```bash
 cargo run -p inkstone-app -- --rebuild
@@ -48,6 +48,8 @@ cargo run -p inkstone-app -- --rebuild
 
 All configuration is driven by environment variables. You can also place them in a
 `.env` file; existing environment variables take precedence.
+
+If `INKSTONE_DATABASE_URL` is set, migrations in `migrations/` run on startup.
 
 - `INKSTONE_HTTP_ADDR` (default: `127.0.0.1:8080`)
 - `INKSTONE_INDEX_DIR` (default: `./data/index`)
