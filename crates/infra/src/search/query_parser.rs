@@ -4,6 +4,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum QueryParseError {
+    #[error("empty search query")]
+    EmptyQuery,
     #[error("empty search token")]
     EmptyToken,
     #[error("invalid range filter: {0}")]
@@ -19,7 +21,7 @@ pub enum QueryParseError {
 pub fn parse_query(input: &str) -> Result<SearchQuery, QueryParseError> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
-        return Ok(SearchQuery::default());
+        return Err(QueryParseError::EmptyQuery);
     }
 
     let mut query = SearchQuery::default();
@@ -113,5 +115,11 @@ mod tests {
         assert_eq!(query.keywords, vec!["Python"]);
         assert_eq!(query.tags, vec!["Rust"]);
         assert!(query.range.is_some());
+    }
+
+    #[test]
+    fn parse_empty_query_returns_error() {
+        let err = parse_query(" ").unwrap_err();
+        assert!(matches!(err, QueryParseError::EmptyQuery));
     }
 }
