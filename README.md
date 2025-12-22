@@ -46,7 +46,8 @@ cargo run -p inkstone-app -- --rebuild
 
 ## Configuration
 
-All configuration is driven by environment variables:
+All configuration is driven by environment variables. You can also place them in a
+`.env` file; existing environment variables take precedence.
 
 - `INKSTONE_HTTP_ADDR` (default: `127.0.0.1:8080`)
 - `INKSTONE_INDEX_DIR` (default: `./data/index`)
@@ -63,6 +64,15 @@ INKSTONE_INDEX_DIR=./data/index \
 INKSTONE_POLL_INTERVAL_SECS=120 \
 INKSTONE_MAX_SEARCH_LIMIT=100 \
 cargo run -p inkstone-app
+```
+
+Example `.env`:
+
+```bash
+INKSTONE_HTTP_ADDR=127.0.0.1:8080
+INKSTONE_INDEX_DIR=./data/index
+INKSTONE_POLL_INTERVAL_SECS=120
+INKSTONE_MAX_SEARCH_LIMIT=100
 ```
 
 ## Search query format

@@ -40,6 +40,7 @@ async fn main() -> Result<(), AppError> {
     tracing_subscriber::fmt().with_env_filter(env_filter).init();
 
     let cli = Cli::parse();
+    config::load_dotenv()?;
     let config = config::AppConfig::from_env()?;
     if cli.rebuild_schema && !cli.mode.run_worker() {
         return Err(AppError::InvalidCli(

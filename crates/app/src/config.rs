@@ -1,5 +1,5 @@
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use thiserror::Error;
@@ -56,6 +56,23 @@ impl AppConfig {
     }
 }
 
+pub fn load_dotenv() -> Result<(), std::io::Error> {
+    let path = Path::new(".env");
+    if !path.exists() {
+        return Ok(());
+    }
+    let contents = std::fs::read_to_string(path)?;
+    for (key, value) in parse_dotenv(&contents) {
+        if std::env::var_os(&key).is_none() {
+            // Safety: invoked during startup before any threads are spawned.
+            unsafe {
+                std::env::set_var(key, value);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn read_string(key: &'static str, default: &'static str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_string())
 }
@@ -70,4 +87,106 @@ fn read_usize(key: &'static str, default: usize) -> Result<usize, ConfigError> {
     let raw = std::env::var(key).unwrap_or_else(|_| default.to_string());
     raw.parse()
         .map_err(|_| ConfigError::InvalidNumber(key, raw))
+}
+
+fn parse_dotenv(contents: &str) -> Vec<(String, String)> {
+    contents
+        .lines()
+        .filter_map(parse_dotenv_line)
+        .collect()
+}
+
+fn parse_dotenv_line(line: &str) -> Option<(String, String)> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return None;
+    }
+    let trimmed = trimmed.strip_prefix("export ").unwrap_or(trimmed);
+    let (key, value) = trimmed.split_once('=')?;
+    let key = key.trim();
+    if key.is_empty() {
+        return None;
+    }
+    let value = parse_dotenv_value(value.trim());
+    Some((key.to_string(), value))
+}
+
+fn parse_dotenv_value(value: &str) -> String {
+    if let Some(stripped) = value.strip_prefix('"').and_then(|inner| inner.strip_suffix('"')) {
+        return unescape_double_quoted(stripped);
+    }
+    if let Some(stripped) = value.strip_prefix('\'').and_then(|inner| inner.strip_suffix('\'')) {
+        return stripped.to_string();
+    }
+    value.to_string()
+}
+
+fn unescape_double_quoted(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    let mut chars = value.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            match chars.next() {
+                Some('n') => output.push('\n'),
+                Some('r') => output.push('\r'),
+                Some('t') => output.push('\t'),
+                Some('\\') => output.push('\\'),
+                Some('"') => output.push('"'),
+                Some(other) => {
+                    output.push('\\');
+                    output.push(other);
+                }
+                None => output.push('\\'),
+            }
+        } else {
+            output.push(ch);
+        }
+    }
+    output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_dotenv_line;
+
+    #[test]
+    fn parse_dotenv_line_basic() {
+        let (key, value) = parse_dotenv_line("FOO=bar").unwrap();
+        assert_eq!(key, "FOO");
+        assert_eq!(value, "bar");
+    }
+
+    #[test]
+    fn parse_dotenv_line_export() {
+        let (key, value) = parse_dotenv_line("export FOO=bar").unwrap();
+        assert_eq!(key, "FOO");
+        assert_eq!(value, "bar");
+    }
+
+    #[test]
+    fn parse_dotenv_line_double_quotes() {
+        let (key, value) = parse_dotenv_line(r#"FOO="hello world""#).unwrap();
+        assert_eq!(key, "FOO");
+        assert_eq!(value, "hello world");
+    }
+
+    #[test]
+    fn parse_dotenv_line_single_quotes() {
+        let (key, value) = parse_dotenv_line("FOO='hello world'").unwrap();
+        assert_eq!(key, "FOO");
+        assert_eq!(value, "hello world");
+    }
+
+    #[test]
+    fn parse_dotenv_line_escaped() {
+        let (key, value) = parse_dotenv_line(r#"FOO="line\n\"quote\"""#).unwrap();
+        assert_eq!(key, "FOO");
+        assert_eq!(value, "line\n\"quote\"");
+    }
+
+    #[test]
+    fn parse_dotenv_line_comment() {
+        assert!(parse_dotenv_line("# comment").is_none());
+        assert!(parse_dotenv_line("   ").is_none());
+    }
 }
