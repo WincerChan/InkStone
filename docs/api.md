@@ -85,3 +85,41 @@ Error body:
   "error": "message"
 }
 ```
+
+## Douban marks (current year)
+
+`GET /douban/marks`
+
+Returns this year's Douban marks ordered by date ascending.
+
+### Response
+
+`200 OK`
+
+```json
+{
+  "total": 2,
+  "items": [
+    {
+      "title": "Example Title",
+      "poster": "https://img.example.com/poster.jpg",
+      "type": "movie",
+      "date": "2025-12-04",
+      "url": "https://movie.douban.com/subject/1234567/"
+    }
+  ]
+}
+```
+
+### Error responses
+
+- `503 Service Unavailable`: database not configured
+- `500 Internal Server Error`: database or data error
+
+Error body:
+
+```json
+{
+  "error": "message"
+}
+```

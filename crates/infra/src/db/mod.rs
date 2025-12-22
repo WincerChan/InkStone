@@ -5,6 +5,9 @@ pub mod likes_repo;
 pub mod migrations;
 pub mod pool;
 
-pub use douban_repo::{insert_douban_items, upsert_douban_items, DoubanItemRecord, DoubanRepoError};
+pub use douban_repo::{
+    fetch_douban_marks_by_range, insert_douban_items, upsert_douban_items, DoubanItemRecord,
+    DoubanMarkRecord, DoubanRepoError,
+};
 pub use migrations::run_migrations;
 pub use pool::{connect_lazy, DbPool, DbPoolError};
