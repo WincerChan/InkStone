@@ -20,12 +20,16 @@ use crate::wiring::WiringError;
 pub enum AppError {
     #[error("config error: {0}")]
     Config(#[from] ConfigError),
+    #[error("invalid cli: {0}")]
+    InvalidCli(String),
     #[error("wiring error: {0}")]
     Wiring(#[from] WiringError),
     #[error("http error: {0}")]
     Http(#[from] HttpError),
     #[error("job error: {0}")]
     Jobs(#[from] JobError),
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
     #[error("task join error: {0}")]
     Join(#[from] tokio::task::JoinError),
 }
@@ -37,6 +41,21 @@ async fn main() -> Result<(), AppError> {
 
     let cli = Cli::parse();
     let config = config::AppConfig::from_env()?;
+    if cli.rebuild_schema && !cli.mode.run_worker() {
+        return Err(AppError::InvalidCli(
+            "rebuild-schema requires worker mode".to_string(),
+        ));
+    }
+    if cli.rebuild_schema {
+        let index_dir = &config.index_dir;
+        if index_dir.exists() {
+            info!(
+                index_dir = %index_dir.display(),
+                "rebuild schema requested, deleting index dir"
+            );
+            std::fs::remove_dir_all(index_dir)?;
+        }
+    }
     let state = wiring::build_state(config)?;
 
     let mut api_task = None;
@@ -53,9 +72,10 @@ async fn main() -> Result<(), AppError> {
 
     if cli.mode.run_worker() {
         let worker_state = state.clone();
+        let rebuild = cli.rebuild || cli.rebuild_schema;
         worker_task = Some(tokio::spawn(async move {
             info!("worker scheduler starting");
-            jobs::start(worker_state, cli.rebuild).await
+            jobs::start(worker_state, rebuild).await
         }));
     }
 

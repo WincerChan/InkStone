@@ -6,8 +6,11 @@ use std::ops::Bound;
 use tantivy::collector::{Count, TopDocs};
 use tantivy::query::{AllQuery, BooleanQuery, Occur, Query, QueryParser, RangeQuery, TermQuery};
 use tantivy::schema::{
-    Field, IndexRecordOption, Schema, SchemaBuilder, Value, FAST, STORED, STRING, TEXT,
+    Field, IndexRecordOption, Schema, SchemaBuilder, TextFieldIndexing, TextOptions, Value, FAST,
+    STORED, STRING,
 };
+use tantivy::snippet::SnippetGenerator;
+use tantivy::tokenizer::{LowerCaser, RemoveLongFilter, Stemmer, TextAnalyzer};
 use tantivy::{Index, IndexReader, ReloadPolicy, TantivyDocument, Term};
 use thiserror::Error;
 
@@ -31,7 +34,6 @@ pub enum SearchIndexError {
 struct SearchFields {
     id: Field,
     title: Field,
-    summary: Field,
     content: Field,
     url: Field,
     tags: Field,
@@ -58,6 +60,7 @@ impl SearchIndex {
         } else {
             Index::create_in_dir(dir, schema)?
         };
+        register_jieba_tokenizer(&index);
         let schema = index.schema();
         let fields = SearchFields::from_schema(&schema)?;
         let reader = index
@@ -78,17 +81,33 @@ impl SearchIndex {
         offset: usize,
     ) -> Result<SearchResult, SearchIndexError> {
         let searcher = self.reader.searcher();
-        let tantivy_query = build_query(&self.index, &self.fields, query)?;
-        let total = searcher.search(&tantivy_query, &Count)?;
+        let built_query = build_query(&self.index, &self.fields, query)?;
+        let (title_snippet, content_snippet) = if let Some(keyword_query) = built_query.keyword.as_ref()
+        {
+            let mut title_snippet =
+                SnippetGenerator::create(&searcher, &**keyword_query, self.fields.title)?;
+            title_snippet.set_max_num_chars(350);
+            let mut content_snippet =
+                SnippetGenerator::create(&searcher, &**keyword_query, self.fields.content)?;
+            content_snippet.set_max_num_chars(350);
+            (Some(title_snippet), Some(content_snippet))
+        } else {
+            (None, None)
+        };
+        let total = searcher.search(&built_query.query, &Count)?;
         let docs = searcher.search(
-            &tantivy_query,
+            &built_query.query,
             &TopDocs::with_limit(limit.saturating_add(offset)),
         )?;
 
         let mut hits = Vec::new();
         for (_, address) in docs.into_iter().skip(offset).take(limit) {
             let doc: TantivyDocument = searcher.doc(address)?;
-            hits.push(self.document_to_hit(&doc)?);
+            hits.push(self.document_to_hit(
+                &doc,
+                title_snippet.as_ref(),
+                content_snippet.as_ref(),
+            )?);
         }
 
         Ok(SearchResult { total, hits })
@@ -131,9 +150,6 @@ impl SearchIndex {
         let mut document = TantivyDocument::default();
         document.add_text(self.fields.id, &doc.id);
         document.add_text(self.fields.title, &doc.title);
-        if let Some(summary) = &doc.summary {
-            document.add_text(self.fields.summary, summary);
-        }
         document.add_text(self.fields.content, &doc.content);
         document.add_text(self.fields.url, &doc.url);
         for tag in &doc.tags {
@@ -148,11 +164,15 @@ impl SearchIndex {
         document
     }
 
-    fn document_to_hit(&self, doc: &TantivyDocument) -> Result<SearchHit, SearchIndexError> {
-        let id = get_string(doc, self.fields.id).ok_or(SearchIndexError::MissingValue("id"))?;
+    fn document_to_hit(
+        &self,
+        doc: &TantivyDocument,
+        title_snippet: Option<&SnippetGenerator>,
+        content_snippet: Option<&SnippetGenerator>,
+    ) -> Result<SearchHit, SearchIndexError> {
         let title = get_string(doc, self.fields.title).ok_or(SearchIndexError::MissingValue("title"))?;
-        let summary = get_string(doc, self.fields.summary);
         let url = get_string(doc, self.fields.url).ok_or(SearchIndexError::MissingValue("url"))?;
+        let id = url.clone();
         let tags = get_strings(doc, self.fields.tags);
         let category = get_string(doc, self.fields.category);
         let published = get_i64(doc, self.fields.published)
@@ -163,7 +183,18 @@ impl SearchIndex {
         Ok(SearchHit {
             id,
             title,
-            summary,
+            title_snippet: snippet_or_excerpt(
+                title_snippet,
+                doc,
+                self.fields.title,
+                350,
+            ),
+            content_snippet: snippet_or_excerpt(
+                content_snippet,
+                doc,
+                self.fields.content,
+                350,
+            ),
             url,
             tags,
             category,
@@ -182,9 +213,6 @@ impl SearchFields {
             title: schema
                 .get_field("title")
                 .map_err(|_| SearchIndexError::MissingField("title"))?,
-            summary: schema
-                .get_field("summary")
-                .map_err(|_| SearchIndexError::MissingField("summary"))?,
             content: schema
                 .get_field("content")
                 .map_err(|_| SearchIndexError::MissingField("content"))?,
@@ -213,9 +241,8 @@ impl SearchFields {
 fn build_schema() -> Schema {
     let mut builder = SchemaBuilder::default();
     builder.add_text_field("id", STRING | STORED);
-    builder.add_text_field("title", TEXT | STORED);
-    builder.add_text_field("summary", TEXT | STORED);
-    builder.add_text_field("content", TEXT);
+    builder.add_text_field("title", jieba_text_options(true));
+    builder.add_text_field("content", jieba_text_options(true));
     builder.add_text_field("url", STRING | STORED);
     builder.add_text_field("tags", STRING | STORED);
     builder.add_text_field("category", STRING | STORED);
@@ -225,19 +252,44 @@ fn build_schema() -> Schema {
     builder.build()
 }
 
+fn jieba_text_options(stored: bool) -> TextOptions {
+    let indexing = TextFieldIndexing::default()
+        .set_tokenizer("jieba")
+        .set_index_option(IndexRecordOption::WithFreqsAndPositions);
+    let options = TextOptions::default().set_indexing_options(indexing);
+    if stored {
+        options.set_stored()
+    } else {
+        options
+    }
+}
+
+fn register_jieba_tokenizer(index: &Index) {
+    let tokenizer = tantivy_jieba::JiebaTokenizer {};
+    let analyzer = TextAnalyzer::builder(tokenizer)
+        .filter(RemoveLongFilter::limit(40))
+        .filter(LowerCaser)
+        .filter(Stemmer::default())
+        .build();
+    index.tokenizers().register("jieba", analyzer);
+}
+
 fn build_query(
     index: &Index,
     fields: &SearchFields,
     query: &SearchQuery,
-) -> Result<Box<dyn Query>, SearchIndexError> {
+) -> Result<BuiltQuery, SearchIndexError> {
     let mut clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
 
-    if !query.keywords.is_empty() {
-        let parser = QueryParser::for_index(index, vec![fields.title, fields.content, fields.summary]);
+    let keyword_query = if !query.keywords.is_empty() {
+        let parser = QueryParser::for_index(index, vec![fields.title, fields.content]);
         let query_str = query.keywords.join(" ");
         let keyword_query = parser.parse_query(&query_str)?;
-        clauses.push((Occur::Must, keyword_query));
-    }
+        clauses.push((Occur::Must, keyword_query.box_clone()));
+        Some(keyword_query)
+    } else {
+        None
+    };
 
     if !query.tags.is_empty() {
         for tag in &query.tags {
@@ -255,28 +307,45 @@ fn build_query(
 
     if let Some(range) = &query.range {
         let (start, end) = range.to_timestamp_bounds();
-        let range_query: Box<dyn Query> = match (start, end) {
-            (Some(start), Some(end)) => Box::new(RangeQuery::new(
-                Bound::Included(Term::from_field_i64(fields.published, start)),
-                Bound::Included(Term::from_field_i64(fields.published, end)),
-            )),
-            (Some(start), None) => Box::new(RangeQuery::new(
-                Bound::Included(Term::from_field_i64(fields.published, start)),
-                Bound::Unbounded,
-            )),
-            (None, Some(end)) => Box::new(RangeQuery::new(
-                Bound::Unbounded,
-                Bound::Included(Term::from_field_i64(fields.published, end)),
-            )),
-            (None, None) => Box::new(AllQuery),
-        };
-        clauses.push((Occur::Must, range_query));
+        if start.is_some() || end.is_some() {
+            let published_query = build_range_query(fields.published, start, end);
+            let updated_query = build_range_query(fields.updated, start, end);
+            let range_query = BooleanQuery::from(vec![
+                (Occur::Should, published_query),
+                (Occur::Should, updated_query),
+            ]);
+            clauses.push((Occur::Must, Box::new(range_query)));
+        }
     }
 
-    if clauses.is_empty() {
-        Ok(Box::new(AllQuery))
+    let query: Box<dyn Query> = if clauses.is_empty() {
+        Box::new(AllQuery)
     } else {
-        Ok(Box::new(BooleanQuery::from(clauses)))
+        Box::new(BooleanQuery::from(clauses))
+    };
+    Ok(BuiltQuery { query, keyword: keyword_query })
+}
+
+struct BuiltQuery {
+    query: Box<dyn Query>,
+    keyword: Option<Box<dyn Query>>,
+}
+
+fn build_range_query(field: Field, start: Option<i64>, end: Option<i64>) -> Box<dyn Query> {
+    match (start, end) {
+        (Some(start), Some(end)) => Box::new(RangeQuery::new(
+            Bound::Included(Term::from_field_i64(field, start)),
+            Bound::Included(Term::from_field_i64(field, end)),
+        )),
+        (Some(start), None) => Box::new(RangeQuery::new(
+            Bound::Included(Term::from_field_i64(field, start)),
+            Bound::Unbounded,
+        )),
+        (None, Some(end)) => Box::new(RangeQuery::new(
+            Bound::Unbounded,
+            Bound::Included(Term::from_field_i64(field, end)),
+        )),
+        (None, None) => Box::new(AllQuery),
     }
 }
 
@@ -294,6 +363,239 @@ fn get_i64(doc: &TantivyDocument, field: Field) -> Option<i64> {
     doc.get_first(field)?.as_i64()
 }
 
+fn snippet_html(generator: Option<&SnippetGenerator>, doc: &TantivyDocument) -> Option<String> {
+    let generator = generator?;
+    let snippet = generator.snippet_from_doc(doc);
+    let html = snippet.to_html();
+    let trimmed = html.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn snippet_or_excerpt(
+    generator: Option<&SnippetGenerator>,
+    doc: &TantivyDocument,
+    field: Field,
+    max_chars: usize,
+) -> Option<String> {
+    if let Some(snippet) = snippet_html(generator, doc) {
+        return Some(snippet);
+    }
+    let text = get_string(doc, field)?;
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.chars().take(max_chars).collect())
+    }
+}
+
 fn timestamp_to_datetime(ts: i64, field: &'static str) -> Result<DateTime<Utc>, SearchIndexError> {
     DateTime::<Utc>::from_timestamp(ts, 0).ok_or(SearchIndexError::InvalidTimestamp(field))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tantivy::collector::TopDocs;
+    use tantivy::doc;
+    use tantivy::query::QueryParser;
+    use tantivy::tokenizer::TokenStream;
+
+    #[test]
+    fn jieba_tokenizer_searches_chinese() -> Result<(), SearchIndexError> {
+        let schema = build_schema();
+        let title = schema.get_field("title")?;
+        let content = schema.get_field("content")?;
+        let index = Index::create_in_ram(schema);
+        register_jieba_tokenizer(&index);
+
+        let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
+        writer.add_document(doc!(
+            title => "张华考上了北京大学；我在百货公司当售货员",
+            content => "百货公司里有一个售货员正在忙碌。"
+        ))?;
+        writer.commit()?;
+
+        let reader = index.reader()?;
+        let searcher = reader.searcher();
+        let query_parser = QueryParser::for_index(&index, vec![title, content]);
+        let query = query_parser.parse_query("售货员")?;
+        let top_docs = searcher.search(&query, &TopDocs::with_limit(5))?;
+        assert!(!top_docs.is_empty());
+        let doc_address = top_docs[0].1;
+        let doc: TantivyDocument = searcher.doc(doc_address)?;
+
+        let mut title_snippet = SnippetGenerator::create(&searcher, &*query, title)?;
+        title_snippet.set_max_num_chars(350);
+        let mut content_snippet = SnippetGenerator::create(&searcher, &*query, content)?;
+        content_snippet.set_max_num_chars(350);
+        let title_html = title_snippet.snippet_from_doc(&doc).to_html();
+        let content_html = content_snippet.snippet_from_doc(&doc).to_html();
+        assert!(title_html.contains("售货员"));
+        assert!(content_html.contains("售货员"));
+        Ok(())
+    }
+
+    #[test]
+    fn jieba_tokenizer_outputs_tokens_for_content() -> Result<(), SearchIndexError> {
+        let schema = build_schema();
+        let index = Index::create_in_ram(schema);
+        register_jieba_tokenizer(&index);
+
+        let mut analyzer = index
+            .tokenizers()
+            .get("jieba")
+            .expect("jieba tokenizer");
+        let content = "临近我 28 岁生日时，我原本并没有写文章的打算。";
+        let mut stream = analyzer.token_stream(content);
+        let mut tokens = Vec::new();
+        while stream.advance() {
+            tokens.push(stream.token().text.clone());
+        }
+        println!("jieba tokens: {:?}", tokens);
+        assert!(!tokens.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn jieba_searches_three_years_phrase_in_title() -> Result<(), SearchIndexError> {
+        let schema = build_schema();
+        let title = schema.get_field("title")?;
+        let content = schema.get_field("content")?;
+        let index = Index::create_in_ram(schema);
+        register_jieba_tokenizer(&index);
+
+        let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
+        writer.add_document(doc!(
+            title => "离职，三年未满",
+            content => "正文"
+        ))?;
+        writer.commit()?;
+
+        let reader = index.reader()?;
+        let searcher = reader.searcher();
+        let query_parser = QueryParser::for_index(&index, vec![title, content]);
+        let query = query_parser.parse_query("三年")?;
+        let top_docs = searcher.search(&query, &TopDocs::with_limit(5))?;
+        assert!(!top_docs.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn title_snippet_falls_back_to_title_text() -> Result<(), SearchIndexError> {
+        let schema = build_schema();
+        let title = schema.get_field("title")?;
+        let content = schema.get_field("content")?;
+        let index = Index::create_in_ram(schema);
+        register_jieba_tokenizer(&index);
+
+        let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
+        writer.add_document(doc!(
+            title => "离职，三年未满",
+            content => "正文"
+        ))?;
+        writer.commit()?;
+
+        let reader = index.reader()?;
+        let searcher = reader.searcher();
+        let query_parser = QueryParser::for_index(&index, vec![content]);
+        let query = query_parser.parse_query("正文")?;
+        let top_docs = searcher.search(&query, &TopDocs::with_limit(1))?;
+        let doc_address = top_docs[0].1;
+        let doc: TantivyDocument = searcher.doc(doc_address)?;
+
+        let mut title_snippet = SnippetGenerator::create(&searcher, &*query, title)?;
+        title_snippet.set_max_num_chars(350);
+        let snippet = snippet_or_excerpt(Some(&title_snippet), &doc, title, 350).unwrap();
+        assert!(snippet.contains("离职"));
+        Ok(())
+    }
+
+    #[test]
+    fn keyword_query_ignores_tags() -> Result<(), SearchIndexError> {
+        let schema = build_schema();
+        let title = schema.get_field("title")?;
+        let content = schema.get_field("content")?;
+        let tags = schema.get_field("tags")?;
+        let index = Index::create_in_ram(schema);
+        register_jieba_tokenizer(&index);
+
+        let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
+        writer.add_document(doc!(
+            title => "无关标题",
+            content => "无关正文",
+            tags => "售货员"
+        ))?;
+        writer.commit()?;
+
+        let fields = SearchFields {
+            id: index.schema().get_field("id")?,
+            title,
+            content,
+            url: index.schema().get_field("url")?,
+            tags,
+            category: index.schema().get_field("category")?,
+            published: index.schema().get_field("published")?,
+            updated: index.schema().get_field("updated")?,
+            checksum: index.schema().get_field("checksum")?,
+        };
+
+        let searcher = index.reader_builder().try_into()?.searcher();
+        let search_query = SearchQuery {
+            keywords: vec!["售货员".to_string()],
+            ..Default::default()
+        };
+        let built = build_query(&index, &fields, &search_query)?;
+        let hits = searcher.search(&built.query, &TopDocs::with_limit(10))?;
+        assert!(hits.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn range_query_matches_updated() -> Result<(), SearchIndexError> {
+        let schema = build_schema();
+        let title = schema.get_field("title")?;
+        let content = schema.get_field("content")?;
+        let published = schema.get_field("published")?;
+        let updated = schema.get_field("updated")?;
+        let index = Index::create_in_ram(schema);
+        register_jieba_tokenizer(&index);
+
+        let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
+        writer.add_document(doc!(
+            title => "只更新命中",
+            content => "正文内容",
+            published => 1_577_836_800i64,
+            updated => 1_735_689_600i64
+        ))?;
+        writer.commit()?;
+
+        let fields = SearchFields {
+            id: index.schema().get_field("id")?,
+            title,
+            content,
+            url: index.schema().get_field("url")?,
+            tags: index.schema().get_field("tags")?,
+            category: index.schema().get_field("category")?,
+            published,
+            updated,
+            checksum: index.schema().get_field("checksum")?,
+        };
+
+        let range = inkstone_core::types::time_range::TimeRange::parse("2024-01-01~2026-01-01")
+            .unwrap();
+        let search_query = SearchQuery {
+            range: Some(range),
+            ..Default::default()
+        };
+        let built = build_query(&index, &fields, &search_query)?;
+        let searcher = index.reader_builder().try_into()?.searcher();
+        let hits = searcher.search(&built.query, &TopDocs::with_limit(10))?;
+        assert_eq!(hits.len(), 1);
+        Ok(())
+    }
 }

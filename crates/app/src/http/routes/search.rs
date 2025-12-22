@@ -4,6 +4,7 @@ use axum::response::IntoResponse;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tracing::debug;
 
 use crate::state::AppState;
 use inkstone_core::domain::search::{SearchHit, SearchResult};
@@ -47,6 +48,7 @@ pub async fn search(
     let offset = params.offset.unwrap_or(0);
 
     let query = parse_query(&query_text)?;
+    debug!(query_text = %query_text, ?query, "parsed search query");
     let result: SearchResult = state.search.search(&query, limit, offset)?;
 
     Ok(Json(SearchResponse {

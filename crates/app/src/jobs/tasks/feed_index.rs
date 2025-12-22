@@ -21,8 +21,6 @@ pub struct JobStats {
 
 #[derive(Debug, Error)]
 enum EntryError {
-    #[error("missing entry id")]
-    MissingId,
     #[error("missing entry title")]
     MissingTitle,
     #[error("missing entry link")]
@@ -35,12 +33,10 @@ enum EntryError {
 
 #[derive(Debug, Default)]
 struct AtomEntry {
-    id: String,
     title: Option<String>,
     link: Option<String>,
     published: Option<String>,
     updated: Option<String>,
-    summary: Option<String>,
     content: Option<String>,
     categories: Vec<AtomCategory>,
 }
@@ -54,10 +50,8 @@ struct AtomCategory {
 #[derive(Debug, Clone, Copy)]
 enum TextTarget {
     Title,
-    Id,
     Published,
     Updated,
-    Summary,
     Content,
 }
 
@@ -264,10 +258,8 @@ fn assign_text(entry: &mut AtomEntry, target: TextTarget, value: &str) {
     }
     match target {
         TextTarget::Title => entry.title = Some(trimmed.to_string()),
-        TextTarget::Id => entry.id = trimmed.to_string(),
         TextTarget::Published => entry.published = Some(trimmed.to_string()),
         TextTarget::Updated => entry.updated = Some(trimmed.to_string()),
-        TextTarget::Summary => entry.summary = Some(trimmed.to_string()),
         TextTarget::Content => entry.content = Some(trimmed.to_string()),
     }
 }
@@ -276,10 +268,8 @@ impl TextTarget {
     fn from_name(name: &[u8]) -> Option<Self> {
         match name {
             b"title" => Some(TextTarget::Title),
-            b"id" => Some(TextTarget::Id),
             b"published" => Some(TextTarget::Published),
             b"updated" => Some(TextTarget::Updated),
-            b"summary" => Some(TextTarget::Summary),
             b"content" => Some(TextTarget::Content),
             _ => None,
         }
@@ -288,19 +278,14 @@ impl TextTarget {
     fn matches(self, name: &[u8]) -> bool {
         match self {
             TextTarget::Title => name == b"title",
-            TextTarget::Id => name == b"id",
             TextTarget::Published => name == b"published",
             TextTarget::Updated => name == b"updated",
-            TextTarget::Summary => name == b"summary",
             TextTarget::Content => name == b"content",
         }
     }
 }
 
 fn entry_to_document(entry: &AtomEntry) -> Result<SearchDocument, EntryError> {
-    if entry.id.trim().is_empty() {
-        return Err(EntryError::MissingId);
-    }
     let title = entry
         .title
         .as_ref()
@@ -328,16 +313,7 @@ fn entry_to_document(entry: &AtomEntry) -> Result<SearchDocument, EntryError> {
         .transpose()?
         .unwrap_or(published_at);
 
-    let summary = entry
-        .summary
-        .as_ref()
-        .map(|text| text.trim().to_string())
-        .filter(|text| !text.is_empty());
-    let content_raw = entry
-        .content
-        .as_deref()
-        .or(summary.as_deref())
-        .unwrap_or("");
+    let content_raw = entry.content.as_deref().unwrap_or("");
     let content = strip_html_tags(content_raw).trim().to_string();
 
     let (category, category_term) = entry.categories.first().map_or((None, None), |category| {
@@ -373,10 +349,10 @@ fn entry_to_document(entry: &AtomEntry) -> Result<SearchDocument, EntryError> {
         })
         .collect();
 
+    let doc_id = url.clone();
     let checksum = compute_checksum(
-        &entry.id,
+        &doc_id,
         &title,
-        summary.as_deref().unwrap_or(""),
         &content,
         &url,
         &tags,
@@ -386,9 +362,8 @@ fn entry_to_document(entry: &AtomEntry) -> Result<SearchDocument, EntryError> {
     );
 
     Ok(SearchDocument {
-        id: entry.id.clone(),
+        id: doc_id,
         title,
-        summary,
         content,
         url,
         tags,
@@ -412,7 +387,6 @@ fn parse_datetime(value: &str) -> Result<DateTime<Utc>, EntryError> {
 fn compute_checksum(
     id: &str,
     title: &str,
-    summary: &str,
     content: &str,
     url: &str,
     tags: &[String],
@@ -424,8 +398,6 @@ fn compute_checksum(
     hasher.update(id.as_bytes());
     hasher.update([0]);
     hasher.update(title.as_bytes());
-    hasher.update([0]);
-    hasher.update(summary.as_bytes());
     hasher.update([0]);
     hasher.update(content.as_bytes());
     hasher.update([0]);
@@ -466,12 +438,10 @@ mod tests {
 
     fn base_entry() -> AtomEntry {
         AtomEntry {
-            id: "urn:uuid:1234".to_string(),
             title: Some("Title".to_string()),
             link: Some("https://example.com/post".to_string()),
             published: Some("2025-01-01T00:00:00Z".to_string()),
             updated: None,
-            summary: None,
             content: None,
             categories: Vec::new(),
         }
@@ -513,5 +483,21 @@ mod tests {
         let doc = entry_to_document(&entry).unwrap();
         assert_eq!(doc.category, Some("Category".to_string()));
         assert_eq!(doc.tags, vec!["tag1".to_string()]);
+    }
+
+    #[test]
+    fn content_empty_when_missing() {
+        let mut entry = base_entry();
+        entry.content = Some("<p></p>".to_string());
+
+        let doc = entry_to_document(&entry).unwrap();
+        assert!(doc.content.is_empty());
+    }
+
+    #[test]
+    fn id_uses_url() {
+        let entry = base_entry();
+        let doc = entry_to_document(&entry).unwrap();
+        assert_eq!(doc.id, "https://example.com/post");
     }
 }
