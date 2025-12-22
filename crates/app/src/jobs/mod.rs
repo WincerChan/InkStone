@@ -25,9 +25,9 @@ pub async fn start(state: AppState, rebuild: bool) -> Result<(), JobError> {
         info!(?stats, "rebuild complete");
     }
 
-    let interval = state.config.poll_interval;
+    let feed_interval = state.config.poll_interval;
     let feed_state = state.clone();
-    let feed_job = scheduler::run_interval("feed_index", interval, move || {
+    let feed_job = scheduler::run_interval("feed_index", feed_interval, move || {
         let state = feed_state.clone();
         async move {
             match tasks::feed_index::run(&state, false).await {
@@ -38,8 +38,9 @@ pub async fn start(state: AppState, rebuild: bool) -> Result<(), JobError> {
         }
     });
 
+    let douban_interval = state.config.douban_poll_interval;
     let douban_state = state.clone();
-    let douban_job = scheduler::run_interval("douban_crawl", interval, move || {
+    let douban_job = scheduler::run_interval("douban_crawl", douban_interval, move || {
         let state = douban_state.clone();
         async move {
             if let Err(err) = tasks::douban_crawl::run(&state).await {

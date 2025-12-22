@@ -8,6 +8,7 @@ use crate::jobs::JobError;
 use crate::state::AppState;
 
 const ITEM_LOG_LIMIT: usize = 20;
+const MAX_PAGES: usize = 1;
 
 #[derive(Debug, Serialize)]
 pub struct DoubanItem {
@@ -74,15 +75,20 @@ async fn fetch_all_pages(
     let mut items = Vec::new();
     let mut next_url = category.start_url(uid);
     let mut seen = HashSet::new();
+    let mut pages_fetched = 0;
 
     loop {
         if !seen.insert(next_url.clone()) {
             break;
         }
+        pages_fetched += 1;
         let html = fetch_page(state, &next_url).await?;
         let mut page_items = parse_page(&html, category);
         items.append(&mut page_items);
 
+        if pages_fetched >= MAX_PAGES {
+            break;
+        }
         let next_link = extract_next_link(&html, category.base_url());
         match next_link {
             Some(url) => next_url = url,
@@ -433,7 +439,7 @@ fn log_items(category: DoubanCategory, items: &[DoubanItem]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_book_items, parse_game_items, parse_movie_items};
+    use super::{parse_book_items, parse_game_items, parse_movie_items, MAX_PAGES};
 
     #[test]
     fn parse_movie_item() {
@@ -512,5 +518,10 @@ mod tests {
         assert_eq!(items[0].date.as_deref(), Some("2024-12-12"));
         assert_eq!(items[0].comment.as_deref(), Some("Fun game."));
         assert_eq!(items[0].tags, vec!["tagA", "tagB"]);
+    }
+
+    #[test]
+    fn pagination_disabled_for_debug() {
+        assert_eq!(MAX_PAGES, 1);
     }
 }

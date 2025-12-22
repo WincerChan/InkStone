@@ -10,6 +10,7 @@ pub struct AppConfig {
     pub index_dir: PathBuf,
     pub feed_url: String,
     pub poll_interval: Duration,
+    pub douban_poll_interval: Duration,
     pub request_timeout: Duration,
     pub max_search_limit: usize,
     pub douban_uid: String,
@@ -45,6 +46,8 @@ impl AppConfig {
             ));
         }
         let poll_interval_secs = read_u64("INKSTONE_POLL_INTERVAL_SECS", 300)?;
+        let douban_poll_interval_secs =
+            read_u64("INKSTONE_DOUBAN_POLL_INTERVAL_SECS", poll_interval_secs)?;
         let request_timeout_secs = read_u64("INKSTONE_REQUEST_TIMEOUT_SECS", 15)?;
         let max_search_limit = read_usize("INKSTONE_MAX_SEARCH_LIMIT", 50)?;
         let douban_uid = read_string("INKSTONE_DOUBAN_UID", "93562087");
@@ -59,6 +62,7 @@ impl AppConfig {
             index_dir,
             feed_url,
             poll_interval: Duration::from_secs(poll_interval_secs),
+            douban_poll_interval: Duration::from_secs(douban_poll_interval_secs),
             request_timeout: Duration::from_secs(request_timeout_secs),
             max_search_limit,
             douban_uid,
