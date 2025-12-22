@@ -12,6 +12,9 @@ pub struct AppConfig {
     pub poll_interval: Duration,
     pub request_timeout: Duration,
     pub max_search_limit: usize,
+    pub douban_uid: String,
+    pub douban_cookie: String,
+    pub douban_user_agent: String,
 }
 
 #[derive(Debug, Error)]
@@ -44,6 +47,12 @@ impl AppConfig {
         let poll_interval_secs = read_u64("INKSTONE_POLL_INTERVAL_SECS", 300)?;
         let request_timeout_secs = read_u64("INKSTONE_REQUEST_TIMEOUT_SECS", 15)?;
         let max_search_limit = read_usize("INKSTONE_MAX_SEARCH_LIMIT", 50)?;
+        let douban_uid = read_string("INKSTONE_DOUBAN_UID", "93562087");
+        let douban_cookie = read_string("INKSTONE_DOUBAN_COOKIE", "bid=3EHqn8aRvcI");
+        let douban_user_agent = read_string(
+            "INKSTONE_DOUBAN_USER_AGENT",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        );
 
         Ok(Self {
             http_addr,
@@ -52,6 +61,9 @@ impl AppConfig {
             poll_interval: Duration::from_secs(poll_interval_secs),
             request_timeout: Duration::from_secs(request_timeout_secs),
             max_search_limit,
+            douban_uid,
+            douban_cookie,
+            douban_user_agent,
         })
     }
 }

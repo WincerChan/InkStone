@@ -26,8 +26,9 @@ pub async fn start(state: AppState, rebuild: bool) -> Result<(), JobError> {
     }
 
     let interval = state.config.poll_interval;
-    scheduler::run_interval("feed_index", interval, move || {
-        let state = state.clone();
+    let feed_state = state.clone();
+    let feed_job = scheduler::run_interval("feed_index", interval, move || {
+        let state = feed_state.clone();
         async move {
             match tasks::feed_index::run(&state, false).await {
                 Ok(stats) => info!(?stats, "feed index run complete"),
@@ -35,6 +36,19 @@ pub async fn start(state: AppState, rebuild: bool) -> Result<(), JobError> {
             }
             Ok(())
         }
-    })
-    .await
+    });
+
+    let douban_state = state.clone();
+    let douban_job = scheduler::run_interval("douban_crawl", interval, move || {
+        let state = douban_state.clone();
+        async move {
+            if let Err(err) = tasks::douban_crawl::run(&state).await {
+                warn!(error = %err, "douban crawl failed");
+            }
+            Ok(())
+        }
+    });
+
+    tokio::try_join!(feed_job, douban_job)?;
+    Ok(())
 }

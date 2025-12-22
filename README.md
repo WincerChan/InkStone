@@ -55,6 +55,9 @@ All configuration is driven by environment variables. You can also place them in
 - `INKSTONE_POLL_INTERVAL_SECS` (default: `300`)
 - `INKSTONE_REQUEST_TIMEOUT_SECS` (default: `15`)
 - `INKSTONE_MAX_SEARCH_LIMIT` (default: `50`)
+- `INKSTONE_DOUBAN_UID` (default: `93562087`)
+- `INKSTONE_DOUBAN_COOKIE` (default: `bid=3EHqn8aRvcI`)
+- `INKSTONE_DOUBAN_USER_AGENT` (default: `Mozilla/5.0 ...`)
 
 Example:
 
@@ -63,6 +66,9 @@ INKSTONE_HTTP_ADDR=0.0.0.0:8080 \
 INKSTONE_INDEX_DIR=./data/index \
 INKSTONE_POLL_INTERVAL_SECS=120 \
 INKSTONE_MAX_SEARCH_LIMIT=100 \
+INKSTONE_DOUBAN_UID=93562087 \
+INKSTONE_DOUBAN_COOKIE=bid=3EHqn8aRvcI \
+INKSTONE_DOUBAN_USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36" \
 cargo run -p inkstone-app
 ```
 
@@ -73,6 +79,9 @@ INKSTONE_HTTP_ADDR=127.0.0.1:8080
 INKSTONE_INDEX_DIR=./data/index
 INKSTONE_POLL_INTERVAL_SECS=120
 INKSTONE_MAX_SEARCH_LIMIT=100
+INKSTONE_DOUBAN_UID=93562087
+INKSTONE_DOUBAN_COOKIE=bid=3EHqn8aRvcI
+INKSTONE_DOUBAN_USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
 ```
 
 ## Search query format
