@@ -83,6 +83,13 @@ Example:
 curl "http://127.0.0.1:8080/search?q=Python%20range:2020-01-01~%20tags:Rust"
 ```
 
+Query limits:
+
+- Query string length (entire URL query): max 512 chars
+- `q` length: max 256 chars, cannot be empty
+- Max 10 keywords
+- Control characters are rejected; whitespace is normalized
+
 ## API documentation
 
 See `docs/api.md`.

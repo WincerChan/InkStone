@@ -18,7 +18,7 @@ ok
 
 ### Query parameters
 
-- `q` (optional): search query string
+- `q` (required): search query string (max 256 chars, cannot be empty)
 - `limit` (optional): number of results to return (default: 20, max: `INKSTONE_MAX_SEARCH_LIMIT`)
 - `offset` (optional): pagination offset (default: 0)
 
@@ -39,6 +39,13 @@ Example:
 ```bash
 curl "http://127.0.0.1:8080/search?q=Python%20range:2020-01-01~%20tags:Rust"
 ```
+
+### Input limits
+
+- Query string length (entire URL query): max 512 chars
+- `q` length: max 256 chars, cannot be empty
+- Max 10 keywords
+- Control characters are rejected; whitespace is normalized
 
 ### Response
 
@@ -67,7 +74,8 @@ Notes:
 
 ### Error responses
 
-- `400 Bad Request`: invalid query syntax (e.g. invalid range)
+- `400 Bad Request`: invalid query syntax (e.g. invalid range), empty query, control characters, too many keywords, or `q` exceeds 256 chars
+- `414 URI Too Long`: query string exceeds 512 chars
 - `500 Internal Server Error`: search backend failure
 
 Error body:
