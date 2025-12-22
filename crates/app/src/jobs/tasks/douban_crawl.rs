@@ -8,7 +8,6 @@ use crate::jobs::JobError;
 use crate::state::AppState;
 
 const ITEM_LOG_LIMIT: usize = 20;
-const MAX_PAGES: usize = 1;
 
 #[derive(Debug, Serialize)]
 pub struct DoubanItem {
@@ -76,6 +75,7 @@ async fn fetch_all_pages(
     let mut next_url = category.start_url(uid);
     let mut seen = HashSet::new();
     let mut pages_fetched = 0;
+    let max_pages = state.config.douban_max_pages;
 
     loop {
         if !seen.insert(next_url.clone()) {
@@ -86,7 +86,7 @@ async fn fetch_all_pages(
         let mut page_items = parse_page(&html, category);
         items.append(&mut page_items);
 
-        if pages_fetched >= MAX_PAGES {
+        if max_pages > 0 && pages_fetched >= max_pages {
             break;
         }
         let next_link = extract_next_link(&html, category.base_url());
@@ -439,7 +439,7 @@ fn log_items(category: DoubanCategory, items: &[DoubanItem]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_book_items, parse_game_items, parse_movie_items, MAX_PAGES};
+    use super::{parse_book_items, parse_game_items, parse_movie_items};
 
     #[test]
     fn parse_movie_item() {
@@ -520,8 +520,4 @@ mod tests {
         assert_eq!(items[0].tags, vec!["tagA", "tagB"]);
     }
 
-    #[test]
-    fn pagination_disabled_for_debug() {
-        assert_eq!(MAX_PAGES, 1);
-    }
 }
