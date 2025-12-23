@@ -6,6 +6,7 @@ use thiserror::Error;
 use tokio::sync::RwLock;
 
 use crate::config::AppConfig;
+use crate::kudos_cache::KudosCache;
 use crate::state::AppState;
 use inkstone_infra::db::{connect_lazy, DbPoolError};
 use inkstone_infra::search::{SearchIndex, SearchIndexError};
@@ -33,5 +34,6 @@ pub fn build_state(config: AppConfig) -> Result<AppState, WiringError> {
         http_client: client,
         db,
         valid_paths: Arc::new(RwLock::new(HashSet::new())),
+        kudos_cache: Arc::new(RwLock::new(KudosCache::default())),
     })
 }

@@ -114,6 +114,7 @@ Notes:
 - The API sets/uses the `bid` cookie for idempotent kudos.
 - `PUT /kudos` requires a valid `bid` cookie; missing/invalid cookies return `401`.
 - `path` must exist in `valid_paths.txt`, otherwise `404` is returned.
+- Kudos counts are served from in-memory cache; the worker flushes pending kudos to the database.
 
 Error responses:
 

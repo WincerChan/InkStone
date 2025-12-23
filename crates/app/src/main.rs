@@ -2,6 +2,7 @@ mod cli;
 mod config;
 mod http;
 mod jobs;
+mod kudos_cache;
 mod state;
 mod wiring;
 

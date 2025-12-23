@@ -2,5 +2,6 @@ pub mod analytics_rollup;
 pub mod douban_crawl;
 pub mod feed_index;
 pub mod github_sync;
+pub mod kudos_cache;
 pub mod search_reindex;
 pub mod valid_paths_refresh;

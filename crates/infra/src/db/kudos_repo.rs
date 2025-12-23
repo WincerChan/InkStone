@@ -7,6 +7,12 @@ pub enum KudosRepoError {
     Sqlx(#[from] sqlx::Error),
 }
 
+#[derive(Debug)]
+pub struct KudosEntry {
+    pub path: String,
+    pub interaction_id: Vec<u8>,
+}
+
 pub async fn insert_kudos(
     pool: &PgPool,
     path: &str,
@@ -24,6 +30,27 @@ pub async fn insert_kudos(
     .execute(pool)
     .await?;
     Ok(result.rows_affected() > 0)
+}
+
+pub async fn load_all_kudos(pool: &PgPool) -> Result<Vec<KudosEntry>, KudosRepoError> {
+    let rows = sqlx::query(
+        r#"
+        SELECT path, interaction_id
+        FROM kudos
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut entries = Vec::with_capacity(rows.len());
+    for row in rows {
+        let path: String = row.try_get("path")?;
+        let interaction_id: Vec<u8> = row.try_get("interaction_id")?;
+        entries.push(KudosEntry {
+            path,
+            interaction_id,
+        });
+    }
+    Ok(entries)
 }
 
 pub async fn count_kudos(pool: &PgPool, path: &str) -> Result<i64, KudosRepoError> {

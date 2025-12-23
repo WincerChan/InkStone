@@ -7,7 +7,6 @@ use thiserror::Error;
 
 use crate::http::middleware::bid_cookie::ClientIds;
 use crate::state::AppState;
-use inkstone_infra::db::{count_kudos, has_kudos, insert_kudos, KudosRepoError};
 
 const MAX_PATH_LEN: usize = 512;
 
@@ -34,8 +33,6 @@ pub enum KudosApiError {
     ValidPathsUnavailable,
     #[error("db not configured")]
     DbUnavailable,
-    #[error("db error: {0}")]
-    Db(#[from] KudosRepoError),
 }
 
 #[derive(Debug, Serialize)]
@@ -48,11 +45,12 @@ pub async fn get_kudos(
     Extension(ids): Extension<ClientIds>,
     Query(params): Query<KudosParams>,
 ) -> Result<Json<KudosResponse>, KudosApiError> {
+    ensure_db_configured(&state)?;
     let path = normalize_path(params.path)?;
     ensure_valid_path(&state, &path).await?;
-    let pool = state.db.as_ref().ok_or(KudosApiError::DbUnavailable)?;
-    let count = count_kudos(pool, &path).await?;
-    let interacted = has_kudos(pool, &path, &ids.interaction_id).await?;
+    let cache = state.kudos_cache.read().await;
+    let count = cache.count(&path);
+    let interacted = cache.has(&path, &ids.interaction_id);
     Ok(Json(KudosResponse { count, interacted }))
 }
 
@@ -61,11 +59,12 @@ pub async fn put_kudos(
     Extension(ids): Extension<ClientIds>,
     Query(params): Query<KudosParams>,
 ) -> Result<Json<KudosResponse>, KudosApiError> {
+    ensure_db_configured(&state)?;
     let path = normalize_path(params.path)?;
     ensure_valid_path(&state, &path).await?;
-    let pool = state.db.as_ref().ok_or(KudosApiError::DbUnavailable)?;
-    insert_kudos(pool, &path, &ids.interaction_id).await?;
-    let count = count_kudos(pool, &path).await?;
+    let mut cache = state.kudos_cache.write().await;
+    cache.insert(&path, &ids.interaction_id);
+    let count = cache.count(&path);
     Ok(Json(KudosResponse {
         count,
         interacted: true,
@@ -98,6 +97,13 @@ async fn ensure_valid_path(state: &AppState, path: &str) -> Result<(), KudosApiE
     Ok(())
 }
 
+fn ensure_db_configured(state: &AppState) -> Result<(), KudosApiError> {
+    if state.db.is_none() {
+        return Err(KudosApiError::DbUnavailable);
+    }
+    Ok(())
+}
+
 impl IntoResponse for KudosApiError {
     fn into_response(self) -> axum::response::Response {
         let (status, message) = match &self {
@@ -108,7 +114,6 @@ impl IntoResponse for KudosApiError {
                 (StatusCode::SERVICE_UNAVAILABLE, self.to_string())
             }
             KudosApiError::DbUnavailable => (StatusCode::SERVICE_UNAVAILABLE, self.to_string()),
-            KudosApiError::Db(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
         };
         let body = Json(ErrorBody { error: message });
         (status, body).into_response()

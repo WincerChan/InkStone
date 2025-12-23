@@ -16,6 +16,8 @@ pub enum JobError {
     Search(#[from] inkstone_infra::search::SearchIndexError),
     #[error("db error: {0}")]
     Db(#[from] inkstone_infra::db::DoubanRepoError),
+    #[error("kudos db error: {0}")]
+    KudosDb(#[from] inkstone_infra::db::KudosRepoError),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -58,6 +60,14 @@ pub async fn start(state: AppState, rebuild: bool) -> Result<(), JobError> {
         warn!(error = %err, "valid paths refresh failed");
     }
 
+    if state.db.is_some() {
+        if let Err(err) = tasks::kudos_cache::load(&state).await {
+            warn!(error = %err, "kudos cache load failed");
+        }
+    } else {
+        warn!("db not configured; skipping kudos cache load/flush");
+    }
+
     let paths_interval = state.config.valid_paths_refresh_interval;
     let paths_state = state.clone();
     let paths_job = scheduler::run_interval("valid_paths_refresh", paths_interval, move || {
@@ -70,6 +80,21 @@ pub async fn start(state: AppState, rebuild: bool) -> Result<(), JobError> {
         }
     });
 
-    tokio::try_join!(feed_job, douban_job, paths_job)?;
+    let kudos_interval = state.config.kudos_flush_interval;
+    if state.db.is_some() && kudos_interval.as_secs() > 0 {
+        let kudos_state = state.clone();
+        let kudos_job = scheduler::run_interval("kudos_cache_flush", kudos_interval, move || {
+            let state = kudos_state.clone();
+            async move {
+                if let Err(err) = tasks::kudos_cache::flush(&state).await {
+                    warn!(error = %err, "kudos cache flush failed");
+                }
+                Ok(())
+            }
+        });
+        tokio::try_join!(feed_job, douban_job, paths_job, kudos_job)?;
+    } else {
+        tokio::try_join!(feed_job, douban_job, paths_job)?;
+    }
     Ok(())
 }
