@@ -2,9 +2,9 @@ use axum::middleware;
 use axum::routing::get;
 use axum::Router;
 
-use crate::http::middleware::search_query_limit;
+use crate::http::middleware::{bid_cookie, search_query_limit};
 use crate::state::AppState;
-use crate::http::routes::{douban, health, search};
+use crate::http::routes::{douban, health, kudos, search};
 
 pub fn build(state: AppState) -> Router {
     Router::new()
@@ -15,5 +15,10 @@ pub fn build(state: AppState) -> Router {
                 .layer(middleware::from_fn(search_query_limit::enforce_search_query_length)),
         )
         .route("/douban/marks", get(douban::marks_this_year))
+        .route("/kudos", get(kudos::get_kudos).put(kudos::put_kudos))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            bid_cookie::ensure_bid_cookie,
+        ))
         .with_state(state)
 }

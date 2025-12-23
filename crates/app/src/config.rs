@@ -18,6 +18,10 @@ pub struct AppConfig {
     pub douban_uid: String,
     pub douban_cookie: String,
     pub douban_user_agent: String,
+    pub cookie_secret: Option<String>,
+    pub stats_secret: Option<String>,
+    pub valid_paths_url: String,
+    pub valid_paths_refresh_interval: Duration,
 }
 
 #[derive(Debug, Error)]
@@ -60,6 +64,13 @@ impl AppConfig {
             "INKSTONE_DOUBAN_USER_AGENT",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
         );
+        let cookie_secret = read_optional_string("INKSTONE_COOKIE_SECRET");
+        let stats_secret = read_optional_string("INKSTONE_STATS_SECRET");
+        let valid_paths_url = read_string(
+            "INKSTONE_VALID_PATHS_URL",
+            "https://velite-refactor.blog-8fo.pages.dev/valid_paths.txt",
+        );
+        let valid_paths_refresh_secs = read_u64("INKSTONE_VALID_PATHS_REFRESH_SECS", 3600)?;
 
         Ok(Self {
             http_addr,
@@ -74,6 +85,10 @@ impl AppConfig {
             douban_uid,
             douban_cookie,
             douban_user_agent,
+            cookie_secret,
+            stats_secret,
+            valid_paths_url,
+            valid_paths_refresh_interval: Duration::from_secs(valid_paths_refresh_secs),
         })
     }
 }

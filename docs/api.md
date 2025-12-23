@@ -86,6 +86,49 @@ Error body:
 }
 ```
 
+## Kudos
+
+`GET /kudos`
+
+Query parameters:
+
+- `path` (required): blog path, e.g. `/posts/hello/`
+
+Response:
+
+```json
+{
+  "count": 12,
+  "interacted": true
+}
+```
+
+`PUT /kudos`
+
+Query parameters:
+
+- `path` (required): blog path, e.g. `/posts/hello/`
+
+Notes:
+
+- The API sets/uses the `bid` cookie for idempotent kudos.
+- `path` must exist in `valid_paths.txt`, otherwise `404` is returned.
+
+Error responses:
+
+- `400 Bad Request`: missing/invalid path
+- `404 Not Found`: path not in valid list
+- `503 Service Unavailable`: valid paths not loaded, cookie secrets missing, or DB not configured
+- `500 Internal Server Error`: database error
+
+Error body:
+
+```json
+{
+  "error": "message"
+}
+```
+
 ## Douban marks (current year)
 
 `GET /douban/marks`

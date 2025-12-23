@@ -1,7 +1,9 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use reqwest::Client;
 use thiserror::Error;
+use tokio::sync::RwLock;
 
 use crate::config::AppConfig;
 use crate::state::AppState;
@@ -30,5 +32,6 @@ pub fn build_state(config: AppConfig) -> Result<AppState, WiringError> {
         search: Arc::new(search),
         http_client: client,
         db,
+        valid_paths: Arc::new(RwLock::new(HashSet::new())),
     })
 }

@@ -54,6 +54,22 @@ pub async fn start(state: AppState, rebuild: bool) -> Result<(), JobError> {
         }
     });
 
-    tokio::try_join!(feed_job, douban_job)?;
+    if let Err(err) = tasks::valid_paths_refresh::run(&state).await {
+        warn!(error = %err, "valid paths refresh failed");
+    }
+
+    let paths_interval = state.config.valid_paths_refresh_interval;
+    let paths_state = state.clone();
+    let paths_job = scheduler::run_interval("valid_paths_refresh", paths_interval, move || {
+        let state = paths_state.clone();
+        async move {
+            if let Err(err) = tasks::valid_paths_refresh::run(&state).await {
+                warn!(error = %err, "valid paths refresh failed");
+            }
+            Ok(())
+        }
+    });
+
+    tokio::try_join!(feed_job, douban_job, paths_job)?;
     Ok(())
 }

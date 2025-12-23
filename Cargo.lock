@@ -1452,12 +1452,15 @@ name = "inkstone-app"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64",
  "chrono",
  "clap",
  "hex",
+ "hmac",
  "inkstone-core",
  "inkstone-infra",
  "quick-xml",
+ "rand 0.8.5",
  "reqwest",
  "scraper",
  "serde",
