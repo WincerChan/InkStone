@@ -112,12 +112,14 @@ Query parameters:
 Notes:
 
 - The API sets/uses the `bid` cookie for idempotent kudos.
+- `PUT /kudos` requires a valid `bid` cookie; missing/invalid cookies return `401`.
 - `path` must exist in `valid_paths.txt`, otherwise `404` is returned.
 
 Error responses:
 
 - `400 Bad Request`: missing/invalid path
 - `404 Not Found`: path not in valid list
+- `401 Unauthorized`: missing/invalid `bid` cookie
 - `503 Service Unavailable`: valid paths not loaded, cookie secrets missing, or DB not configured
 - `500 Internal Server Error`: database error
 

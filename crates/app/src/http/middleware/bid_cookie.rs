@@ -1,7 +1,7 @@
+use axum::body::Body;
 use axum::extract::State;
 use axum::http::header::{COOKIE, SET_COOKIE};
-use axum::body::Body;
-use axum::http::Request;
+use axum::http::{Method, Request};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -33,6 +33,8 @@ pub enum BidCookieError {
     MissingCookieSecret,
     #[error("stats secret not configured")]
     MissingStatsSecret,
+    #[error("bid cookie required")]
+    CookieRequired,
 }
 
 pub async fn ensure_bid_cookie(
@@ -61,6 +63,9 @@ pub async fn ensure_bid_cookie(
     {
         Some(value) => value,
         None => {
+            if requires_cookie(&request) {
+                return Err(BidCookieError::CookieRequired);
+            }
             let token_bytes = generate_token_bytes();
             let token_str = encode_token(&token_bytes);
             let sig = sign_token(cookie_secret, &token_str);
@@ -82,6 +87,10 @@ pub async fn ensure_bid_cookie(
         }
     }
     Ok(response)
+}
+
+fn requires_cookie(request: &Request<Body>) -> bool {
+    request.method() == Method::PUT && request.uri().path() == "/kudos"
 }
 
 fn extract_cookie<B>(request: &Request<B>, name: &str) -> Option<String> {
@@ -162,13 +171,24 @@ fn build_cookie_value(token: &str, sig: &str) -> String {
 
 impl IntoResponse for BidCookieError {
     fn into_response(self) -> Response {
-        (axum::http::StatusCode::SERVICE_UNAVAILABLE, self.to_string()).into_response()
+        let status = match self {
+            BidCookieError::CookieRequired => axum::http::StatusCode::UNAUTHORIZED,
+            BidCookieError::MissingCookieSecret | BidCookieError::MissingStatsSecret => {
+                axum::http::StatusCode::SERVICE_UNAVAILABLE
+            }
+        };
+        (status, self.to_string()).into_response()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{build_stats_id, decode_token_bytes, parse_cookie_value, sign_token, verify_cookie};
+    use axum::http::Request;
+
+    use super::{
+        build_stats_id, decode_token_bytes, parse_cookie_value, requires_cookie, sign_token,
+        verify_cookie,
+    };
 
     #[test]
     fn parse_cookie_value_splits_token_and_sig() {
@@ -197,5 +217,15 @@ mod tests {
     fn decode_token_bytes_rejects_wrong_length() {
         let token = "short";
         assert!(decode_token_bytes(token).is_none());
+    }
+
+    #[test]
+    fn requires_cookie_for_kudos_put() {
+        let req = Request::builder()
+            .method("PUT")
+            .uri("/kudos")
+            .body(axum::body::Body::empty())
+            .expect("request");
+        assert!(requires_cookie(&req));
     }
 }
