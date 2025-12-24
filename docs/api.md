@@ -54,6 +54,7 @@ curl "http://127.0.0.1:8080/search?q=Python%20range:2020-01-01~%20tags:Rust"
 ```json
 {
   "total": 1,
+  "elapsed_ms": 12,
   "hits": [
     {
       "id": "urn:uuid:...",
