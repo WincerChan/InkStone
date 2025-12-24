@@ -132,6 +132,56 @@ Error body:
 }
 ```
 
+## Pulse (analytics)
+
+`POST /pulse/pv`
+
+Records a page view (without duration). The server sets a `bid` cookie if missing.
+
+Request body:
+
+```json
+{
+  "page_instance_id": "uuid",
+  "path": "/posts/hello/"
+}
+```
+
+Notes:
+
+- `path` must exist in `valid_paths.txt`, otherwise `404` is returned.
+- `ua_family`, `device`, `source_type`, `ref_host`, and `country` are derived from request headers.
+- `country` uses `CF-IPCountry` if present; otherwise the first `X-Forwarded-For` IP.
+
+`POST /pulse/engage`
+
+Upserts engagement duration for the page instance.
+
+Request body:
+
+```json
+{
+  "page_instance_id": "uuid",
+  "duration_ms": 120000
+}
+```
+
+Responses:
+
+- `204 No Content`: success
+- `400 Bad Request`: missing/invalid fields
+- `404 Not Found`: path not in valid list (pv only)
+- `503 Service Unavailable`: valid paths not loaded, cookie secrets missing, or DB not configured
+- `500 Internal Server Error`: database error
+
+Error body:
+
+```json
+{
+  "error": "message"
+}
+```
+
 ## Douban marks (current year)
 
 `GET /douban/marks`

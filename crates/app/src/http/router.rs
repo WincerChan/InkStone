@@ -1,10 +1,10 @@
 use axum::middleware;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
 
 use crate::http::middleware::{bid_cookie, search_query_limit};
 use crate::state::AppState;
-use crate::http::routes::{douban, health, kudos, search};
+use crate::http::routes::{analytics, douban, health, kudos, search};
 
 pub fn build(state: AppState) -> Router {
     Router::new()
@@ -16,6 +16,8 @@ pub fn build(state: AppState) -> Router {
         )
         .route("/douban/marks", get(douban::marks_this_year))
         .route("/kudos", get(kudos::get_kudos).put(kudos::put_kudos))
+        .route("/pulse/pv", post(analytics::post_pv))
+        .route("/pulse/engage", post(analytics::post_engage))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             bid_cookie::ensure_bid_cookie,
