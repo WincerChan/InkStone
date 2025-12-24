@@ -70,6 +70,7 @@ valid paths and flush kudos cache.
 - `INKSTONE_VALID_PATHS_URL` (default: `https://velite-refactor.blog-8fo.pages.dev/valid_paths.txt`)
 - `INKSTONE_VALID_PATHS_REFRESH_SECS` (default: `3600`)
 - `INKSTONE_KUDOS_FLUSH_SECS` (default: `60`, set `0` to disable)
+- `INKSTONE_GITHUB_WEBHOOK_SECRET` (required for GitHub webhook validation)
 
 Example:
 
@@ -89,6 +90,7 @@ INKSTONE_STATS_SECRET=changeme \
 INKSTONE_VALID_PATHS_URL=https://velite-refactor.blog-8fo.pages.dev/valid_paths.txt \
 INKSTONE_VALID_PATHS_REFRESH_SECS=3600 \
 INKSTONE_KUDOS_FLUSH_SECS=60 \
+INKSTONE_GITHUB_WEBHOOK_SECRET=changeme \
 cargo run -p inkstone-app
 ```
 
@@ -110,6 +112,7 @@ INKSTONE_STATS_SECRET=changeme
 INKSTONE_VALID_PATHS_URL=https://velite-refactor.blog-8fo.pages.dev/valid_paths.txt
 INKSTONE_VALID_PATHS_REFRESH_SECS=3600
 INKSTONE_KUDOS_FLUSH_SECS=60
+INKSTONE_GITHUB_WEBHOOK_SECRET=changeme
 ```
 
 ## Search query format

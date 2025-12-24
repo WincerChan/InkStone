@@ -4,7 +4,7 @@ use axum::Router;
 
 use crate::http::middleware::{bid_cookie, search_query_limit};
 use crate::state::AppState;
-use crate::http::routes::{analytics, douban, health, kudos, search};
+use crate::http::routes::{analytics, douban, health, kudos, search, webhook};
 
 pub fn build(state: AppState) -> Router {
     Router::new()
@@ -18,6 +18,7 @@ pub fn build(state: AppState) -> Router {
         .route("/kudos", get(kudos::get_kudos).put(kudos::put_kudos))
         .route("/pulse/pv", post(analytics::post_pv))
         .route("/pulse/engage", post(analytics::post_engage))
+        .route("/webhook/github", post(webhook::github_webhook))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             bid_cookie::ensure_bid_cookie,

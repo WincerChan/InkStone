@@ -182,6 +182,26 @@ Error body:
 }
 ```
 
+## GitHub webhook
+
+`POST /webhook/github`
+
+Handles GitHub `check_run` events and refreshes `atom.xml` + `valid_paths.txt` on successful
+completed checks. `ping` events return `204`. Requires `INKSTONE_GITHUB_WEBHOOK_SECRET`.
+
+Headers:
+
+- `X-GitHub-Event` (required)
+- `X-Hub-Signature-256` (required, `sha256=<hex>`)
+
+Responses:
+
+- `204 No Content`: `ping` handled
+- `202 Accepted`: event ignored or refresh queued
+- `400 Bad Request`: missing headers or invalid payload
+- `401 Unauthorized`: invalid signature
+- `503 Service Unavailable`: webhook secret not configured
+
 ## Douban marks (current year)
 
 `GET /douban/marks`
