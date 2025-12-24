@@ -2,6 +2,8 @@
 
 Base URL: `http://127.0.0.1:8080`
 
+API prefix: `/v2` (except `/health` and `/webhook/github`)
+
 ## Health
 
 `GET /health`
@@ -25,7 +27,7 @@ Response:
 
 ## Search
 
-`GET /search`
+`GET /v2/search`
 
 ### Query parameters
 
@@ -48,7 +50,7 @@ Tokens are separated by whitespace and may be combined:
 Example:
 
 ```bash
-curl "http://127.0.0.1:8080/search?q=Python%20range:2020-01-01~%20tags:Rust"
+curl "http://127.0.0.1:8080/v2/search?q=Python%20range:2020-01-01~%20tags:Rust"
 ```
 
 ### Input limits
@@ -100,7 +102,7 @@ Error body:
 
 ## Kudos
 
-`GET /kudos`
+`GET /v2/kudos`
 
 Query parameters:
 
@@ -115,7 +117,7 @@ Response:
 }
 ```
 
-`PUT /kudos`
+`PUT /v2/kudos`
 
 Query parameters:
 
@@ -124,7 +126,7 @@ Query parameters:
 Notes:
 
 - The API sets/uses the `bid` cookie for idempotent kudos.
-- `PUT /kudos` requires a valid `bid` cookie; missing/invalid cookies return `401`.
+- `PUT /v2/kudos` requires a valid `bid` cookie; missing/invalid cookies return `401`.
 - `path` must exist in `valid_paths.txt`, otherwise `404` is returned.
 - Kudos counts are served from in-memory cache; the worker flushes pending kudos to the database.
 
@@ -146,7 +148,7 @@ Error body:
 
 ## Pulse (analytics)
 
-`POST /pulse/pv`
+`POST /v2/pulse/pv`
 
 Records a page view (without duration). The server sets a `bid` cookie if missing.
 
@@ -165,7 +167,7 @@ Notes:
 - `ua_family`, `device`, `source_type`, `ref_host`, and `country` are derived from request headers.
 - `country` uses `CF-IPCountry` if present; otherwise the first `X-Forwarded-For` IP.
 
-`POST /pulse/engage`
+`POST /v2/pulse/engage`
 
 Upserts engagement duration for the page instance.
 
@@ -217,7 +219,7 @@ Responses:
 
 ## Douban marks (current year)
 
-`GET /douban/marks`
+`GET /v2/douban/marks`
 
 Returns this year's Douban marks ordered by date ascending.
 

@@ -10,14 +10,14 @@ pub fn build(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health::health))
         .route(
-            "/search",
+            "/v2/search",
             get(search::search)
                 .layer(middleware::from_fn(search_query_limit::enforce_search_query_length)),
         )
-        .route("/douban/marks", get(douban::marks_this_year))
-        .route("/kudos", get(kudos::get_kudos).put(kudos::put_kudos))
-        .route("/pulse/pv", post(analytics::post_pv))
-        .route("/pulse/engage", post(analytics::post_engage))
+        .route("/v2/douban/marks", get(douban::marks_this_year))
+        .route("/v2/kudos", get(kudos::get_kudos).put(kudos::put_kudos))
+        .route("/v2/pulse/pv", post(analytics::post_pv))
+        .route("/v2/pulse/engage", post(analytics::post_engage))
         .route("/webhook/github", post(webhook::github_webhook))
         .layer(middleware::from_fn_with_state(
             state.clone(),

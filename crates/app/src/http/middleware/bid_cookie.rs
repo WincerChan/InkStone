@@ -90,7 +90,7 @@ pub async fn ensure_bid_cookie(
 }
 
 fn requires_cookie(request: &Request<Body>) -> bool {
-    request.method() == Method::PUT && request.uri().path() == "/kudos"
+    request.method() == Method::PUT && request.uri().path() == "/v2/kudos"
 }
 
 fn extract_cookie<B>(request: &Request<B>, name: &str) -> Option<String> {
@@ -223,7 +223,7 @@ mod tests {
     fn requires_cookie_for_kudos_put() {
         let req = Request::builder()
             .method("PUT")
-            .uri("/kudos")
+            .uri("/v2/kudos")
             .body(axum::body::Body::empty())
             .expect("request");
         assert!(requires_cookie(&req));
