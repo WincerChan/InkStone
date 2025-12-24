@@ -3,11 +3,11 @@ use std::sync::Arc;
 
 use reqwest::Client;
 use thiserror::Error;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 use crate::config::AppConfig;
 use crate::kudos_cache::KudosCache;
-use crate::state::AppState;
+use crate::state::{AppState, ContentRefreshBackoff};
 use inkstone_infra::db::{connect_lazy, DbPoolError};
 use inkstone_infra::search::{SearchIndex, SearchIndexError};
 
@@ -35,5 +35,6 @@ pub fn build_state(config: AppConfig) -> Result<AppState, WiringError> {
         db,
         valid_paths: Arc::new(RwLock::new(HashSet::new())),
         kudos_cache: Arc::new(RwLock::new(KudosCache::default())),
+        content_refresh_backoff: Arc::new(Mutex::new(ContentRefreshBackoff::default())),
     })
 }

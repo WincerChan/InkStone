@@ -1,8 +1,9 @@
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Instant;
 
 use reqwest::Client;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 use crate::config::AppConfig;
 use crate::kudos_cache::KudosCache;
@@ -17,4 +18,11 @@ pub struct AppState {
     pub db: Option<DbPool>,
     pub valid_paths: Arc<RwLock<HashSet<String>>>,
     pub kudos_cache: Arc<RwLock<KudosCache>>,
+    pub content_refresh_backoff: Arc<Mutex<ContentRefreshBackoff>>,
+}
+
+#[derive(Debug, Default)]
+pub struct ContentRefreshBackoff {
+    pub next_feed_at: Option<Instant>,
+    pub next_paths_at: Option<Instant>,
 }

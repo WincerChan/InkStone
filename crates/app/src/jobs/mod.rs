@@ -25,7 +25,7 @@ pub enum JobError {
 pub async fn start(state: AppState, rebuild: bool) -> Result<(), JobError> {
     if rebuild {
         info!("running content refresh rebuild before scheduler");
-        let stats = tasks::content_refresh::run(&state, true).await?;
+        let stats = tasks::content_refresh::run(&state, true, true).await?;
         info!(?stats, "content refresh rebuild complete");
         info!("running douban crawl rebuild before scheduler");
         tasks::douban_crawl::run(&state, true).await?;
@@ -36,7 +36,7 @@ pub async fn start(state: AppState, rebuild: bool) -> Result<(), JobError> {
     let refresh_job = scheduler::run_interval("content_refresh", refresh_interval, move || {
         let state = refresh_state.clone();
         async move {
-            match tasks::content_refresh::run(&state, false).await {
+            match tasks::content_refresh::run(&state, false, false).await {
                 Ok(stats) => info!(?stats, "content refresh run complete"),
                 Err(err) => warn!(error = %err, "content refresh run failed"),
             }
