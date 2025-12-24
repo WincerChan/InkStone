@@ -1,0 +1,18 @@
+[Unit]
+Description=Inkstone API/Worker Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=inkstone
+Group=inkstone
+WorkingDirectory=/var/lib/inkstone
+EnvironmentFile=/etc/inkstone/inkstone.env
+ExecStart=/usr/local/bin/inkstone-app --mode all
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
