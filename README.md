@@ -10,7 +10,7 @@ Inkstone is a Rust workspace that combines an HTTP search API with a scheduled w
 
 ## Prerequisites
 
-- Rust 1.85+ (edition 2024)
+- Rust 1.88+ (edition 2024)
 
 ## Quick start
 
