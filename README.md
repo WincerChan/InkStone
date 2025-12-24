@@ -71,6 +71,7 @@ Content refresh failures enter a 60-second per-task backoff without blocking oth
 - `INKSTONE_VALID_PATHS_URL` (default: `https://velite-refactor.blog-8fo.pages.dev/valid_paths.txt`)
 - `INKSTONE_KUDOS_FLUSH_SECS` (default: `60`, set `0` to disable)
 - `INKSTONE_GITHUB_WEBHOOK_SECRET` (required for GitHub webhook validation)
+- `INKSTONE_CORS_ALLOW_ORIGINS` (optional: comma-separated origins for CORS)
 
 Example:
 
@@ -90,6 +91,7 @@ INKSTONE_STATS_SECRET=changeme \
 INKSTONE_VALID_PATHS_URL=https://velite-refactor.blog-8fo.pages.dev/valid_paths.txt \
 INKSTONE_KUDOS_FLUSH_SECS=60 \
 INKSTONE_GITHUB_WEBHOOK_SECRET=changeme \
+INKSTONE_CORS_ALLOW_ORIGINS=http://localhost:5173,http://127.0.0.1:5173 \
 cargo run -p inkstone-app
 ```
 
@@ -111,6 +113,7 @@ INKSTONE_STATS_SECRET=changeme
 INKSTONE_VALID_PATHS_URL=https://velite-refactor.blog-8fo.pages.dev/valid_paths.txt
 INKSTONE_KUDOS_FLUSH_SECS=60
 INKSTONE_GITHUB_WEBHOOK_SECRET=changeme
+INKSTONE_CORS_ALLOW_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
 ## Search query format

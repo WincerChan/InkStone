@@ -23,6 +23,7 @@ pub struct AppConfig {
     pub valid_paths_url: String,
     pub kudos_flush_interval: Duration,
     pub github_webhook_secret: Option<String>,
+    pub cors_allow_origins: Vec<String>,
 }
 
 #[derive(Debug, Error)]
@@ -73,6 +74,7 @@ impl AppConfig {
         );
         let kudos_flush_secs = read_u64("INKSTONE_KUDOS_FLUSH_SECS", 60)?;
         let github_webhook_secret = read_optional_string("INKSTONE_GITHUB_WEBHOOK_SECRET");
+        let cors_allow_origins = read_csv("INKSTONE_CORS_ALLOW_ORIGINS");
 
         Ok(Self {
             http_addr,
@@ -92,6 +94,7 @@ impl AppConfig {
             valid_paths_url,
             kudos_flush_interval: Duration::from_secs(kudos_flush_secs),
             github_webhook_secret,
+            cors_allow_origins,
         })
     }
 }
@@ -137,6 +140,15 @@ fn read_optional_string(key: &'static str) -> Option<String> {
     } else {
         Some(trimmed.to_string())
     }
+}
+
+fn read_csv(key: &'static str) -> Vec<String> {
+    let raw = std::env::var(key).unwrap_or_default();
+    raw.split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .collect()
 }
 
 fn parse_dotenv(contents: &str) -> Vec<(String, String)> {
