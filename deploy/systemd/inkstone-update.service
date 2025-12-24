@@ -1,0 +1,10 @@
+[Unit]
+Description=Inkstone image update (podman compose)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/inkstone
+ExecStart=/usr/bin/podman compose pull
+ExecStartPost=/usr/bin/podman compose up -d --remove-orphans

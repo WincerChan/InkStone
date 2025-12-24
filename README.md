@@ -144,3 +144,7 @@ Query limits:
 ## API documentation
 
 See `docs/api.md`.
+
+## Deployment
+
+See `deploy/README.md` for GHCR + podman compose notes and systemd update timer.
