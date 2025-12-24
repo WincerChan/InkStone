@@ -1444,10 +1444,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ink-stone"
-version = "0.1.0"
-
-[[package]]
 name = "inkstone-app"
 version = "0.1.0"
 dependencies = [
