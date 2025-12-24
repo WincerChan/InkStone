@@ -46,8 +46,8 @@ cargo run -p inkstone-app -- --rebuild
 
 ## Configuration
 
-All configuration is driven by environment variables. You can also place them in a
-`.env` file; existing environment variables take precedence.
+All configuration is driven by environment variables. You can also copy
+`.env.example` to `.env`; existing environment variables take precedence.
 
 If `INKSTONE_DATABASE_URL` is set, migrations in `migrations/` run on startup.
 Kudos endpoints require `INKSTONE_COOKIE_SECRET`, `INKSTONE_STATS_SECRET`, and the worker to refresh
