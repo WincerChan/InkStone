@@ -46,6 +46,14 @@ The quadlet file enables auto-update labels. Turn on the built-in timer:
 sudo systemctl enable --now podman-auto-update.timer
 ```
 
+### Manual update
+
+If you want to update manually (same logic as the timer):
+
+```bash
+sudo systemctl start podman-auto-update.service
+```
+
 ## Podman compose (optional)
 
 1) Copy `deploy/docker/docker-compose.yml` to your server (e.g. `/opt/inkstone/`).
