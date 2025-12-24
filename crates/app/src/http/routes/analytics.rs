@@ -1,9 +1,11 @@
+use axum::body::Bytes;
 use axum::extract::{Extension, State};
 use axum::http::header::REFERER;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
 use chrono::Utc;
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use thiserror::Error;
 use uuid::Uuid;
@@ -38,6 +40,8 @@ pub enum PulseApiError {
     InvalidPath,
     #[error("duration_ms is invalid")]
     InvalidDuration,
+    #[error("invalid payload")]
+    InvalidPayload,
     #[error("valid paths not loaded")]
     ValidPathsUnavailable,
     #[error("path is not allowed")]
@@ -57,8 +61,9 @@ pub async fn post_pv(
     State(state): State<AppState>,
     Extension(ids): Extension<ClientIds>,
     headers: HeaderMap,
-    Json(payload): Json<PulsePvRequest>,
+    body: Bytes,
 ) -> Result<StatusCode, PulseApiError> {
+    let payload: PulsePvRequest = parse_json(&body)?;
     let page_instance_id = parse_uuid(payload.page_instance_id.as_deref())?;
     let path = normalize_path(payload.path.as_deref())?;
     ensure_valid_path(&state, &path).await?;
@@ -91,8 +96,9 @@ pub async fn post_pv(
 
 pub async fn post_engage(
     State(state): State<AppState>,
-    Json(payload): Json<PulseEngageRequest>,
+    body: Bytes,
 ) -> Result<StatusCode, PulseApiError> {
+    let payload: PulseEngageRequest = parse_json(&body)?;
     let page_instance_id = parse_uuid(payload.page_instance_id.as_deref())?;
     let duration_ms = payload.duration_ms.ok_or(PulseApiError::InvalidDuration)?;
     if duration_ms < 0 {
@@ -109,6 +115,16 @@ fn parse_uuid(value: Option<&str>) -> Result<Uuid, PulseApiError> {
         return Err(PulseApiError::MissingPageInstanceId);
     }
     Uuid::parse_str(trimmed).map_err(|_| PulseApiError::InvalidPageInstanceId)
+}
+
+fn parse_json<T>(body: &Bytes) -> Result<T, PulseApiError>
+where
+    T: DeserializeOwned,
+{
+    if body.is_empty() {
+        return Err(PulseApiError::InvalidPayload);
+    }
+    serde_json::from_slice(body).map_err(|_| PulseApiError::InvalidPayload)
 }
 
 fn normalize_path(path: Option<&str>) -> Result<String, PulseApiError> {
@@ -231,7 +247,8 @@ impl IntoResponse for PulseApiError {
             | PulseApiError::InvalidPageInstanceId
             | PulseApiError::MissingPath
             | PulseApiError::InvalidPath
-            | PulseApiError::InvalidDuration => (StatusCode::BAD_REQUEST, self.to_string()),
+            | PulseApiError::InvalidDuration
+            | PulseApiError::InvalidPayload => (StatusCode::BAD_REQUEST, self.to_string()),
             PulseApiError::PathNotAllowed => (StatusCode::NOT_FOUND, self.to_string()),
             PulseApiError::ValidPathsUnavailable | PulseApiError::DbUnavailable => {
                 (StatusCode::SERVICE_UNAVAILABLE, self.to_string())

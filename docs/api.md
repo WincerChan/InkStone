@@ -151,6 +151,7 @@ Error body:
 `POST /v2/pulse/pv`
 
 Records a page view (without duration). The server sets a `bid` cookie if missing.
+Accepts `application/json` or `text/plain` (JSON string) to reduce CORS preflight.
 
 Request body:
 
@@ -170,6 +171,7 @@ Notes:
 `POST /v2/pulse/engage`
 
 Upserts engagement duration for the page instance.
+Accepts `application/json` or `text/plain` (JSON string) to reduce CORS preflight.
 
 Request body:
 
