@@ -8,8 +8,19 @@ Base URL: `http://127.0.0.1:8080`
 
 Response:
 
-```text
-ok
+```json
+{
+  "status": "ok",
+  "modules": {
+    "search": { "enabled": true },
+    "database": { "configured": true },
+    "kudos": { "enabled": true, "cookie_ready": true, "valid_paths_loaded": true },
+    "pulse": { "enabled": true, "cookie_ready": true },
+    "douban": { "enabled": true },
+    "valid_paths": { "loaded": true, "count": 123 },
+    "webhook": { "configured": true }
+  }
+}
 ```
 
 ## Search
