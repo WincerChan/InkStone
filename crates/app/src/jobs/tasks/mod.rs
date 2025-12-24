@@ -1,4 +1,5 @@
 pub mod analytics_rollup;
+pub mod content_refresh;
 pub mod douban_crawl;
 pub mod feed_index;
 pub mod github_sync;

@@ -51,7 +51,7 @@ All configuration is driven by environment variables. You can also place them in
 
 If `INKSTONE_DATABASE_URL` is set, migrations in `migrations/` run on startup.
 Kudos endpoints require `INKSTONE_COOKIE_SECRET`, `INKSTONE_STATS_SECRET`, and the worker to refresh
-valid paths and flush kudos cache.
+valid paths and flush kudos cache (refresh uses `INKSTONE_POLL_INTERVAL_SECS`).
 
 - `INKSTONE_HTTP_ADDR` (default: `127.0.0.1:8080`)
 - `INKSTONE_INDEX_DIR` (default: `./data/index`)
@@ -68,7 +68,6 @@ valid paths and flush kudos cache.
 - `INKSTONE_COOKIE_SECRET` (required for `bid` cookie signing)
 - `INKSTONE_STATS_SECRET` (required for daily stats id derivation)
 - `INKSTONE_VALID_PATHS_URL` (default: `https://velite-refactor.blog-8fo.pages.dev/valid_paths.txt`)
-- `INKSTONE_VALID_PATHS_REFRESH_SECS` (default: `3600`)
 - `INKSTONE_KUDOS_FLUSH_SECS` (default: `60`, set `0` to disable)
 - `INKSTONE_GITHUB_WEBHOOK_SECRET` (required for GitHub webhook validation)
 
@@ -88,7 +87,6 @@ INKSTONE_DOUBAN_USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Appl
 INKSTONE_COOKIE_SECRET=changeme \
 INKSTONE_STATS_SECRET=changeme \
 INKSTONE_VALID_PATHS_URL=https://velite-refactor.blog-8fo.pages.dev/valid_paths.txt \
-INKSTONE_VALID_PATHS_REFRESH_SECS=3600 \
 INKSTONE_KUDOS_FLUSH_SECS=60 \
 INKSTONE_GITHUB_WEBHOOK_SECRET=changeme \
 cargo run -p inkstone-app
@@ -110,7 +108,6 @@ INKSTONE_DOUBAN_USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Appl
 INKSTONE_COOKIE_SECRET=changeme
 INKSTONE_STATS_SECRET=changeme
 INKSTONE_VALID_PATHS_URL=https://velite-refactor.blog-8fo.pages.dev/valid_paths.txt
-INKSTONE_VALID_PATHS_REFRESH_SECS=3600
 INKSTONE_KUDOS_FLUSH_SECS=60
 INKSTONE_GITHUB_WEBHOOK_SECRET=changeme
 ```

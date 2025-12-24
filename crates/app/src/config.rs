@@ -21,7 +21,6 @@ pub struct AppConfig {
     pub cookie_secret: Option<String>,
     pub stats_secret: Option<String>,
     pub valid_paths_url: String,
-    pub valid_paths_refresh_interval: Duration,
     pub kudos_flush_interval: Duration,
     pub github_webhook_secret: Option<String>,
 }
@@ -72,7 +71,6 @@ impl AppConfig {
             "INKSTONE_VALID_PATHS_URL",
             "https://velite-refactor.blog-8fo.pages.dev/valid_paths.txt",
         );
-        let valid_paths_refresh_secs = read_u64("INKSTONE_VALID_PATHS_REFRESH_SECS", 3600)?;
         let kudos_flush_secs = read_u64("INKSTONE_KUDOS_FLUSH_SECS", 60)?;
         let github_webhook_secret = read_optional_string("INKSTONE_GITHUB_WEBHOOK_SECRET");
 
@@ -92,7 +90,6 @@ impl AppConfig {
             cookie_secret,
             stats_secret,
             valid_paths_url,
-            valid_paths_refresh_interval: Duration::from_secs(valid_paths_refresh_secs),
             kudos_flush_interval: Duration::from_secs(kudos_flush_secs),
             github_webhook_secret,
         })

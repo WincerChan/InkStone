@@ -24,21 +24,21 @@ pub enum JobError {
 
 pub async fn start(state: AppState, rebuild: bool) -> Result<(), JobError> {
     if rebuild {
-        info!("running feed index rebuild before scheduler");
-        let stats = tasks::feed_index::run(&state, true).await?;
-        info!(?stats, "rebuild complete");
+        info!("running content refresh rebuild before scheduler");
+        let stats = tasks::content_refresh::run(&state, true).await?;
+        info!(?stats, "content refresh rebuild complete");
         info!("running douban crawl rebuild before scheduler");
         tasks::douban_crawl::run(&state, true).await?;
     }
 
-    let feed_interval = state.config.poll_interval;
-    let feed_state = state.clone();
-    let feed_job = scheduler::run_interval("feed_index", feed_interval, move || {
-        let state = feed_state.clone();
+    let refresh_interval = state.config.poll_interval;
+    let refresh_state = state.clone();
+    let refresh_job = scheduler::run_interval("content_refresh", refresh_interval, move || {
+        let state = refresh_state.clone();
         async move {
-            match tasks::feed_index::run(&state, false).await {
-                Ok(stats) => info!(?stats, "feed index run complete"),
-                Err(err) => warn!(error = %err, "feed index run failed"),
+            match tasks::content_refresh::run(&state, false).await {
+                Ok(stats) => info!(?stats, "content refresh run complete"),
+                Err(err) => warn!(error = %err, "content refresh run failed"),
             }
             Ok(())
         }
@@ -56,10 +56,6 @@ pub async fn start(state: AppState, rebuild: bool) -> Result<(), JobError> {
         }
     });
 
-    if let Err(err) = tasks::valid_paths_refresh::run(&state).await {
-        warn!(error = %err, "valid paths refresh failed");
-    }
-
     if state.db.is_some() {
         if let Err(err) = tasks::kudos_cache::load(&state).await {
             warn!(error = %err, "kudos cache load failed");
@@ -67,18 +63,6 @@ pub async fn start(state: AppState, rebuild: bool) -> Result<(), JobError> {
     } else {
         warn!("db not configured; skipping kudos cache load/flush");
     }
-
-    let paths_interval = state.config.valid_paths_refresh_interval;
-    let paths_state = state.clone();
-    let paths_job = scheduler::run_interval("valid_paths_refresh", paths_interval, move || {
-        let state = paths_state.clone();
-        async move {
-            if let Err(err) = tasks::valid_paths_refresh::run(&state).await {
-                warn!(error = %err, "valid paths refresh failed");
-            }
-            Ok(())
-        }
-    });
 
     let kudos_interval = state.config.kudos_flush_interval;
     if state.db.is_some() && kudos_interval.as_secs() > 0 {
@@ -92,9 +76,9 @@ pub async fn start(state: AppState, rebuild: bool) -> Result<(), JobError> {
                 Ok(())
             }
         });
-        tokio::try_join!(feed_job, douban_job, paths_job, kudos_job)?;
+        tokio::try_join!(refresh_job, douban_job, kudos_job)?;
     } else {
-        tokio::try_join!(feed_job, douban_job, paths_job)?;
+        tokio::try_join!(refresh_job, douban_job)?;
     }
     Ok(())
 }

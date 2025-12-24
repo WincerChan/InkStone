@@ -73,12 +73,9 @@ pub async fn github_webhook(
     let state = state.clone();
     tokio::spawn(async move {
         info!("github webhook triggered refresh");
-        if let Err(err) = tasks::valid_paths_refresh::run(&state).await {
-            warn!(error = %err, "valid paths refresh failed");
-        }
-        match tasks::feed_index::run(&state, false).await {
-            Ok(stats) => info!(?stats, "feed index run complete"),
-            Err(err) => warn!(error = %err, "feed index run failed"),
+        match tasks::content_refresh::run(&state, false).await {
+            Ok(stats) => info!(?stats, "content refresh run complete"),
+            Err(err) => warn!(error = %err, "content refresh run failed"),
         }
     });
 
