@@ -52,6 +52,7 @@ All configuration is driven by environment variables. You can also place them in
 If `INKSTONE_DATABASE_URL` is set, migrations in `migrations/` run on startup.
 Kudos endpoints require `INKSTONE_COOKIE_SECRET`, `INKSTONE_STATS_SECRET`, and the worker to refresh
 valid paths and flush kudos cache (refresh uses `INKSTONE_POLL_INTERVAL_SECS`).
+Content refresh failures enter a 60-second per-task backoff without blocking other tasks.
 
 - `INKSTONE_HTTP_ADDR` (default: `127.0.0.1:8080`)
 - `INKSTONE_INDEX_DIR` (default: `./data/index`)

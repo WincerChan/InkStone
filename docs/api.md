@@ -188,6 +188,7 @@ Error body:
 
 Handles GitHub `check_run` events and refreshes `atom.xml` + `valid_paths.txt` on successful
 completed checks. `ping` events return `204`. Requires `INKSTONE_GITHUB_WEBHOOK_SECRET`.
+Refresh is queued asynchronously; failures enter a 60-second per-task backoff.
 
 Headers:
 
