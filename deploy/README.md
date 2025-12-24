@@ -14,7 +14,39 @@ If the registry is private, log in on the server:
 podman login ghcr.io -u <user> -p <token>
 ```
 
-## Podman compose
+## Quadlet (systemd)
+
+1) Copy `deploy/systemd/inkstone.container` to `/etc/containers/systemd/`.
+2) Create `/opt/inkstone/.env` with your runtime settings.
+3) Ensure `/opt/inkstone/data` is writable by uid `10001`.
+4) Reload and start:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart inkstone.service
+```
+
+Quadlet reads `inkstone.container` and generates `inkstone.service` under
+`/run/systemd/generator/`. That generated unit cannot be enabled; just start or
+restart it after changes. The `[Install]` section in the `.container` file is
+applied by the generator on boot.
+
+If you want rootless podman, use `~/.config/containers/systemd/` and:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user restart inkstone.service
+```
+
+### Auto update (podman auto-update)
+
+The quadlet file enables auto-update labels. Turn on the built-in timer:
+
+```bash
+sudo systemctl enable --now podman-auto-update.timer
+```
+
+## Podman compose (optional)
 
 1) Copy `deploy/docker/docker-compose.yml` to your server (e.g. `/opt/inkstone/`).
 2) Replace `OWNER` with your GitHub org/user.
@@ -48,15 +80,4 @@ If you use rootless podman, run the ownership change via:
 
 ```bash
 podman unshare chown -R 10001:0 /opt/inkstone/data
-```
-
-## Auto update (systemd)
-
-Use the timer to pull and restart periodically:
-
-```bash
-sudo cp deploy/systemd/inkstone-update.service /etc/systemd/system/
-sudo cp deploy/systemd/inkstone-update.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now inkstone-update.timer
 ```

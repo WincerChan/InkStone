@@ -1,0 +1,19 @@
+[Unit]
+Description=Inkstone Container
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=ghcr.io/wincerchan/inkstone:latest
+ContainerName=inkstone
+EnvironmentFile=/opt/inkstone/.env
+PublishPort=8080:8080
+Volume=/opt/inkstone/data:/data
+AutoUpdate=registry
+
+[Service]
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
