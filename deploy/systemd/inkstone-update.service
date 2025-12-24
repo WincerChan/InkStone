@@ -6,5 +6,6 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=/opt/inkstone
+RemainAfterExit=yes
 ExecStart=/usr/bin/podman compose pull
-ExecStartPost=/usr/bin/podman compose up -d --remove-orphans
+ExecStart=/usr/bin/podman compose up -d --remove-orphans
