@@ -6,7 +6,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY migrations ./migrations
 
-RUN cargo build -p inkstone-app --release --locked
+RUN cargo build --manifest-path crates/app/Cargo.toml --release --locked
 
 FROM debian:bookworm-slim
 
