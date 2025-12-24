@@ -27,6 +27,29 @@ cd /opt/inkstone
 podman compose up -d
 ```
 
+### Data directory and index path
+
+The container runs as uid `10001`, so the host data directory must be writable by that user.
+If you mount `/opt/inkstone/data` to `/data`, set:
+
+```
+INKSTONE_INDEX_DIR=/data/index
+```
+
+Ensure permissions:
+
+```bash
+sudo mkdir -p /opt/inkstone/data
+sudo chown -R 10001:0 /opt/inkstone/data
+sudo chmod -R u+rwX,g+rwX /opt/inkstone/data
+```
+
+If you use rootless podman, run the ownership change via:
+
+```bash
+podman unshare chown -R 10001:0 /opt/inkstone/data
+```
+
 ## Auto update (systemd)
 
 Use the timer to pull and restart periodically:
