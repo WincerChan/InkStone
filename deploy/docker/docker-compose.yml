@@ -1,6 +1,6 @@
 services:
   inkstone:
-    image: ghcr.io/WincerChan/inkstone:latest
+    image: ghcr.io/wincerchan/inkstone:latest
     restart: unless-stopped
     ports:
       - "8080:8080"
