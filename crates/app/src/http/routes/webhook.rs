@@ -50,22 +50,35 @@ pub async fn github_webhook(
         .github_webhook_secret
         .as_deref()
         .filter(|value| !value.is_empty())
-        .ok_or(WebhookError::SecretUnavailable)?;
-    let event = header_value(&headers, HEADER_EVENT).ok_or(WebhookError::MissingEvent)?;
-    let signature = header_value(&headers, HEADER_SIGNATURE).ok_or(WebhookError::MissingSignature)?;
+        .ok_or_else(|| {
+            warn!("github webhook secret missing");
+            WebhookError::SecretUnavailable
+        })?;
+    let event = header_value(&headers, HEADER_EVENT).ok_or_else(|| {
+        warn!("github webhook missing event header");
+        WebhookError::MissingEvent
+    })?;
+    let signature = header_value(&headers, HEADER_SIGNATURE).ok_or_else(|| {
+        warn!(event, "github webhook missing signature header");
+        WebhookError::MissingSignature
+    })?;
     if !verify_signature(secret, &body, signature) {
+        warn!(event, "github webhook invalid signature");
         return Err(WebhookError::InvalidSignature);
     }
 
     if event.eq_ignore_ascii_case("ping") {
+        info!("github webhook ping received");
         return Ok(StatusCode::NO_CONTENT);
     }
     if !event.eq_ignore_ascii_case("check_run") {
         return Ok(StatusCode::ACCEPTED);
     }
 
-    let payload: CheckRunPayload =
-        serde_json::from_slice(&body).map_err(|_| WebhookError::InvalidPayload)?;
+    let payload: CheckRunPayload = serde_json::from_slice(&body).map_err(|_| {
+        warn!(event, "github webhook invalid payload");
+        WebhookError::InvalidPayload
+    })?;
     if !should_trigger(&payload) {
         return Ok(StatusCode::ACCEPTED);
     }
