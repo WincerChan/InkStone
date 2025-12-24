@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use chrono::NaiveDate;
 use scraper::{ElementRef, Html, Selector};
 use serde::Serialize;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::jobs::JobError;
 use crate::state::AppState;
@@ -514,12 +514,12 @@ fn log_items(category: DoubanCategory, items: &[DoubanItem]) {
     info!(category = label, total = items.len(), "douban crawl parsed");
     for item in items.iter().take(ITEM_LOG_LIMIT) {
         match serde_json::to_string(item) {
-            Ok(json) => info!(category = label, item = %json, "douban item"),
+            Ok(json) => debug!(category = label, item = %json, "douban item"),
             Err(err) => warn!(category = label, error = %err, "douban item serialize failed"),
         }
     }
     if items.len() > ITEM_LOG_LIMIT {
-        info!(
+        debug!(
             category = label,
             omitted = items.len().saturating_sub(ITEM_LOG_LIMIT),
             "douban items omitted from log"
