@@ -48,6 +48,8 @@ cargo run -p inkstone-app -- --rebuild
 
 All configuration is driven by environment variables. You can also copy
 `.env.example` to `.env`; existing environment variables take precedence.
+If a value is missing or empty, `INKSTONE_*_FILE` is checked and the file
+contents (trimmed) are used.
 
 If `INKSTONE_DATABASE_URL` is set, migrations in `migrations/` run on startup.
 Kudos endpoints require `INKSTONE_COOKIE_SECRET`, `INKSTONE_STATS_SECRET`, and the worker to refresh

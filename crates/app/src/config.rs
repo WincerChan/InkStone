@@ -34,19 +34,21 @@ pub enum ConfigError {
     InvalidNumber(&'static str, String),
     #[error("invalid value for {0}: {1}")]
     InvalidValue(&'static str, String),
+    #[error("invalid file for {0}: {1}")]
+    InvalidFile(&'static str, String),
 }
 
 impl AppConfig {
     pub fn from_env() -> Result<Self, ConfigError> {
-        let http_addr_raw = read_string("INKSTONE_HTTP_ADDR", "127.0.0.1:8080");
+        let http_addr_raw = read_string("INKSTONE_HTTP_ADDR", "127.0.0.1:8080")?;
         let http_addr = http_addr_raw
             .parse()
             .map_err(|_| ConfigError::InvalidSocket(http_addr_raw.clone()))?;
-        let index_dir = PathBuf::from(read_string("INKSTONE_INDEX_DIR", "./data/index"));
+        let index_dir = PathBuf::from(read_string("INKSTONE_INDEX_DIR", "./data/index")?);
         let feed_url = read_string(
             "INKSTONE_FEED_URL",
             "https://velite-refactor.blog-8fo.pages.dev/atom.xml",
-        );
+        )?;
         if feed_url.trim().is_empty() {
             return Err(ConfigError::InvalidValue(
                 "INKSTONE_FEED_URL",
@@ -58,23 +60,23 @@ impl AppConfig {
             read_u64("INKSTONE_DOUBAN_POLL_INTERVAL_SECS", poll_interval_secs)?;
         let request_timeout_secs = read_u64("INKSTONE_REQUEST_TIMEOUT_SECS", 15)?;
         let max_search_limit = read_usize("INKSTONE_MAX_SEARCH_LIMIT", 50)?;
-        let database_url = read_optional_string("INKSTONE_DATABASE_URL");
+        let database_url = read_optional_string("INKSTONE_DATABASE_URL")?;
         let douban_max_pages = read_usize("INKSTONE_DOUBAN_MAX_PAGES", 1)?;
-        let douban_uid = read_string("INKSTONE_DOUBAN_UID", "93562087");
-        let douban_cookie = read_string("INKSTONE_DOUBAN_COOKIE", "bid=3EHqn8aRvcI");
+        let douban_uid = read_string("INKSTONE_DOUBAN_UID", "93562087")?;
+        let douban_cookie = read_string("INKSTONE_DOUBAN_COOKIE", "bid=3EHqn8aRvcI")?;
         let douban_user_agent = read_string(
             "INKSTONE_DOUBAN_USER_AGENT",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-        );
-        let cookie_secret = read_optional_string("INKSTONE_COOKIE_SECRET");
-        let stats_secret = read_optional_string("INKSTONE_STATS_SECRET");
+        )?;
+        let cookie_secret = read_optional_string("INKSTONE_COOKIE_SECRET")?;
+        let stats_secret = read_optional_string("INKSTONE_STATS_SECRET")?;
         let valid_paths_url = read_string(
             "INKSTONE_VALID_PATHS_URL",
             "https://velite-refactor.blog-8fo.pages.dev/valid_paths.txt",
-        );
+        )?;
         let kudos_flush_secs = read_u64("INKSTONE_KUDOS_FLUSH_SECS", 60)?;
-        let github_webhook_secret = read_optional_string("INKSTONE_GITHUB_WEBHOOK_SECRET");
-        let cors_allow_origins = read_csv("INKSTONE_CORS_ALLOW_ORIGINS");
+        let github_webhook_secret = read_optional_string("INKSTONE_GITHUB_WEBHOOK_SECRET")?;
+        let cors_allow_origins = read_csv("INKSTONE_CORS_ALLOW_ORIGINS")?;
 
         Ok(Self {
             http_addr,
@@ -116,39 +118,58 @@ pub fn load_dotenv() -> Result<(), std::io::Error> {
     Ok(())
 }
 
-fn read_string(key: &'static str, default: &'static str) -> String {
-    std::env::var(key).unwrap_or_else(|_| default.to_string())
+fn read_string(key: &'static str, default: &'static str) -> Result<String, ConfigError> {
+    Ok(read_raw(key)?.unwrap_or_else(|| default.to_string()))
 }
 
 fn read_u64(key: &'static str, default: u64) -> Result<u64, ConfigError> {
-    let raw = std::env::var(key).unwrap_or_else(|_| default.to_string());
+    let raw = read_raw(key)?.unwrap_or_else(|| default.to_string());
     raw.parse()
         .map_err(|_| ConfigError::InvalidNumber(key, raw))
 }
 
 fn read_usize(key: &'static str, default: usize) -> Result<usize, ConfigError> {
-    let raw = std::env::var(key).unwrap_or_else(|_| default.to_string());
+    let raw = read_raw(key)?.unwrap_or_else(|| default.to_string());
     raw.parse()
         .map_err(|_| ConfigError::InvalidNumber(key, raw))
 }
 
-fn read_optional_string(key: &'static str) -> Option<String> {
-    let value = std::env::var(key).unwrap_or_default();
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
+fn read_optional_string(key: &'static str) -> Result<Option<String>, ConfigError> {
+    read_raw(key)
 }
 
-fn read_csv(key: &'static str) -> Vec<String> {
-    let raw = std::env::var(key).unwrap_or_default();
-    raw.split(',')
+fn read_csv(key: &'static str) -> Result<Vec<String>, ConfigError> {
+    let raw = read_raw(key)?.unwrap_or_default();
+    Ok(raw
+        .split(',')
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(|value| value.to_string())
-        .collect()
+        .collect())
+}
+
+fn read_raw(key: &'static str) -> Result<Option<String>, ConfigError> {
+    if let Ok(value) = std::env::var(key) {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return Ok(Some(trimmed.to_string()));
+        }
+    }
+
+    let file_key = format!("{key}_FILE");
+    let file_path = std::env::var(&file_key).unwrap_or_default();
+    let file_path = file_path.trim();
+    if file_path.is_empty() {
+        return Ok(None);
+    }
+
+    let contents = std::fs::read_to_string(file_path)
+        .map_err(|_| ConfigError::InvalidFile(key, file_path.to_string()))?;
+    let trimmed = contents.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(trimmed.to_string()))
 }
 
 fn parse_dotenv(contents: &str) -> Vec<(String, String)> {
@@ -209,7 +230,60 @@ fn unescape_double_quoted(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_dotenv_line;
+    use super::{parse_dotenv_line, read_string, read_u64, ConfigError};
+    use std::path::PathBuf;
+    use std::sync::Mutex;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct EnvGuard {
+        vars: Vec<(&'static str, Option<String>)>,
+    }
+
+    impl EnvGuard {
+        fn new() -> Self {
+            Self { vars: Vec::new() }
+        }
+
+        fn set(&mut self, key: &'static str, value: Option<&str>) {
+            let prev = std::env::var(key).ok();
+            self.vars.push((key, prev));
+            match value {
+                Some(value) => unsafe {
+                    std::env::set_var(key, value);
+                },
+                None => unsafe {
+                    std::env::remove_var(key);
+                },
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (key, prev) in self.vars.drain(..).rev() {
+                match prev {
+                    Some(value) => unsafe {
+                        std::env::set_var(key, value);
+                    },
+                    None => unsafe {
+                        std::env::remove_var(key);
+                    },
+                }
+            }
+        }
+    }
+
+    fn temp_path(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let mut path = std::env::temp_dir();
+        path.push(format!("inkstone_{name}_{nanos}"));
+        path
+    }
 
     #[test]
     fn parse_dotenv_line_basic() {
@@ -250,5 +324,56 @@ mod tests {
     fn parse_dotenv_line_comment() {
         assert!(parse_dotenv_line("# comment").is_none());
         assert!(parse_dotenv_line("   ").is_none());
+    }
+
+    #[test]
+    fn read_string_uses_file_when_env_empty() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let path = temp_path("config_string");
+        std::fs::write(&path, "from_file\n").unwrap();
+        let mut env = EnvGuard::new();
+        env.set("INKSTONE_TEST_VALUE", Some(""));
+        env.set(
+            "INKSTONE_TEST_VALUE_FILE",
+            Some(path.to_str().expect("temp path utf8")),
+        );
+
+        let value = read_string("INKSTONE_TEST_VALUE", "default").unwrap();
+        assert_eq!(value, "from_file");
+
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn read_u64_uses_file_when_missing() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let path = temp_path("config_number");
+        std::fs::write(&path, "42").unwrap();
+        let mut env = EnvGuard::new();
+        env.set("INKSTONE_TEST_NUM", None);
+        env.set(
+            "INKSTONE_TEST_NUM_FILE",
+            Some(path.to_str().expect("temp path utf8")),
+        );
+
+        let value = read_u64("INKSTONE_TEST_NUM", 7).unwrap();
+        assert_eq!(value, 42);
+
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn read_string_errors_on_missing_file() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let path = temp_path("config_missing");
+        let mut env = EnvGuard::new();
+        env.set("INKSTONE_TEST_MISSING", None);
+        env.set(
+            "INKSTONE_TEST_MISSING_FILE",
+            Some(path.to_str().expect("temp path utf8")),
+        );
+
+        let err = read_string("INKSTONE_TEST_MISSING", "default").unwrap_err();
+        assert!(matches!(err, ConfigError::InvalidFile("INKSTONE_TEST_MISSING", _)));
     }
 }
