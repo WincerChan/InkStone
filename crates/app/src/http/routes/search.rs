@@ -10,7 +10,7 @@ use tracing::{info, warn};
 
 use crate::state::AppState;
 use inkstone_core::domain::search::{SearchHit, SearchResult};
-use inkstone_infra::search::{parse_query, QueryParseError, SearchIndexError};
+use inkstone_infra::search::{parse_query, QueryParseError, SearchIndexError, SearchSort};
 
 const MAX_QUERY_LEN: usize = 256;
 
@@ -19,6 +19,36 @@ pub struct SearchParams {
     pub q: Option<String>,
     pub limit: Option<usize>,
     pub offset: Option<usize>,
+    pub sort: Option<SearchSortParam>,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum SearchSortParam {
+    Relevance,
+    Latest,
+}
+
+impl Default for SearchSortParam {
+    fn default() -> Self {
+        Self::Relevance
+    }
+}
+
+impl SearchSortParam {
+    fn as_sort(self) -> SearchSort {
+        match self {
+            SearchSortParam::Relevance => SearchSort::Relevance,
+            SearchSortParam::Latest => SearchSort::Latest,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            SearchSortParam::Relevance => "relevance",
+            SearchSortParam::Latest => "latest",
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -63,6 +93,7 @@ pub async fn search(
         .unwrap_or(20)
         .min(state.config.max_search_limit);
     let offset = params.offset.unwrap_or(0);
+    let sort = params.sort.unwrap_or_default();
 
     let query = match parse_query(&query_text) {
         Ok(query) => query,
@@ -76,7 +107,7 @@ pub async fn search(
             return Err(err.into());
         }
     };
-    let result: SearchResult = match state.search.search(&query, limit, offset) {
+    let result: SearchResult = match state.search.search(&query, limit, offset, sort.as_sort()) {
         Ok(result) => result,
         Err(err) => {
             warn!(
@@ -93,6 +124,7 @@ pub async fn search(
         query_text = %query_text,
         limit,
         offset,
+        sort = sort.as_str(),
         total = result.total,
         elapsed_ms = started_at.elapsed().as_millis(),
         "search request completed"
@@ -125,7 +157,8 @@ impl IntoResponse for SearchApiError {
 
 #[cfg(test)]
 mod tests {
-    use super::{enforce_query_length, SearchApiError, MAX_QUERY_LEN};
+    use super::{enforce_query_length, SearchApiError, SearchSortParam, MAX_QUERY_LEN};
+    use serde_json::json;
 
     #[test]
     fn query_length_rejects_long_text() {
@@ -138,5 +171,11 @@ mod tests {
     fn query_length_allows_limit() {
         let query = "a".repeat(MAX_QUERY_LEN);
         enforce_query_length(&query).unwrap();
+    }
+
+    #[test]
+    fn sort_param_parses_latest() {
+        let sort: SearchSortParam = serde_json::from_value(json!("latest")).unwrap();
+        assert!(matches!(sort, SearchSortParam::Latest));
     }
 }

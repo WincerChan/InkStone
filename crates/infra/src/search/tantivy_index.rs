@@ -13,8 +13,10 @@ use tantivy::schema::{
 };
 use tantivy::snippet::SnippetGenerator;
 use tantivy::tokenizer::{LowerCaser, RemoveLongFilter, Stemmer, TextAnalyzer};
-use tantivy::{Index, IndexReader, ReloadPolicy, TantivyDocument, Term};
+use tantivy::{DocAddress, Index, IndexReader, Order, ReloadPolicy, TantivyDocument, Term};
 use thiserror::Error;
+
+use super::SearchSort;
 
 #[derive(Debug, Error)]
 pub enum SearchIndexError {
@@ -81,6 +83,7 @@ impl SearchIndex {
         query: &SearchQuery,
         limit: usize,
         offset: usize,
+        sort: SearchSort,
     ) -> Result<SearchResult, SearchIndexError> {
         let searcher = self.reader.searcher();
         let built_query = build_query(&self.index, &self.fields, query)?;
@@ -88,22 +91,37 @@ impl SearchIndex {
         {
             let mut title_snippet =
                 SnippetGenerator::create(&searcher, &**keyword_query, self.fields.title)?;
-            title_snippet.set_max_num_chars(350);
+            title_snippet.set_max_num_chars(150);
             let mut content_snippet =
                 SnippetGenerator::create(&searcher, &**keyword_query, self.fields.content)?;
-            content_snippet.set_max_num_chars(350);
+            content_snippet.set_max_num_chars(150);
             (Some(title_snippet), Some(content_snippet))
         } else {
             (None, None)
         };
         let total = searcher.search(&built_query.query, &Count)?;
-        let docs = searcher.search(
-            &built_query.query,
-            &TopDocs::with_limit(limit.saturating_add(offset)),
-        )?;
+        let docs: Vec<DocAddress> = match sort {
+            SearchSort::Relevance => searcher
+                .search(
+                    &built_query.query,
+                    &TopDocs::with_limit(limit.saturating_add(offset)),
+                )?
+                .into_iter()
+                .map(|(_, address)| address)
+                .collect(),
+            SearchSort::Latest => {
+                let collector = TopDocs::with_limit(limit.saturating_add(offset))
+                    .order_by_fast_field::<i64>("updated", Order::Desc);
+                searcher
+                    .search(&built_query.query, &collector)?
+                    .into_iter()
+                    .map(|(_, address)| address)
+                    .collect()
+            }
+        };
 
         let mut hits = Vec::new();
-        for (_, address) in docs.into_iter().skip(offset).take(limit) {
+        for address in docs.into_iter().skip(offset).take(limit) {
             let doc: TantivyDocument = searcher.doc(address)?;
             hits.push(self.document_to_hit(
                 &doc,
@@ -184,9 +202,9 @@ impl SearchIndex {
 
         Ok(SearchHit {
             id,
-            title: snippet_or_excerpt(title_snippet, doc, self.fields.title, 350)
+            title: snippet_or_excerpt(title_snippet, doc, self.fields.title, 150)
                 .unwrap_or(title),
-            content: snippet_or_excerpt(content_snippet, doc, self.fields.content, 350),
+            content: snippet_or_excerpt(content_snippet, doc, self.fields.content, 150),
             url,
             tags,
             category,
@@ -335,13 +353,29 @@ fn build_keyword_query(
         let tokens = tokenize_keyword(&mut analyzer, keyword);
         let title_query = build_field_query(fields.title, &tokens);
         let content_query = build_field_query(fields.content, &tokens);
-        let keyword_query = match (title_query, content_query) {
-            (Some(title_query), Some(content_query)) => Some(Box::new(BooleanQuery::new(vec![
-                (Occur::Should, title_query),
-                (Occur::Should, content_query),
-            ])) as Box<dyn Query>),
-            (Some(query), None) | (None, Some(query)) => Some(query),
-            (None, None) => None,
+        let mut clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
+        if let Some(query) = title_query {
+            clauses.push((Occur::Should, query));
+        }
+        if let Some(query) = content_query {
+            clauses.push((Occur::Should, query));
+        }
+        if !keyword.is_empty() {
+            let tag_query = TermQuery::new(
+                Term::from_field_text(fields.tags, keyword),
+                IndexRecordOption::Basic,
+            );
+            clauses.push((Occur::Should, Box::new(tag_query)));
+            let category_query = TermQuery::new(
+                Term::from_field_text(fields.category, keyword),
+                IndexRecordOption::Basic,
+            );
+            clauses.push((Occur::Should, Box::new(category_query)));
+        }
+        let keyword_query = if clauses.is_empty() {
+            None
+        } else {
+            Some(Box::new(BooleanQuery::new(clauses)) as Box<dyn Query>)
         };
         if let Some(keyword_query) = keyword_query {
             keyword_queries.push(keyword_query);
@@ -498,9 +532,9 @@ mod tests {
 
         let keyword_query = built.keyword.as_ref().expect("keyword query");
         let mut title_snippet = SnippetGenerator::create(&searcher, &**keyword_query, title)?;
-        title_snippet.set_max_num_chars(350);
+        title_snippet.set_max_num_chars(150);
         let mut content_snippet = SnippetGenerator::create(&searcher, &**keyword_query, content)?;
-        content_snippet.set_max_num_chars(350);
+        content_snippet.set_max_num_chars(150);
         let title_html = title_snippet.snippet_from_doc(&doc).to_html();
         let content_html = content_snippet.snippet_from_doc(&doc).to_html();
         assert!(title_html.contains("售货员"));
@@ -584,14 +618,14 @@ mod tests {
 
         let keyword_query = built.keyword.as_ref().expect("keyword query");
         let mut title_snippet = SnippetGenerator::create(&searcher, &**keyword_query, title)?;
-        title_snippet.set_max_num_chars(350);
-        let snippet = snippet_or_excerpt(Some(&title_snippet), &doc, title, 350).unwrap();
+        title_snippet.set_max_num_chars(150);
+        let snippet = snippet_or_excerpt(Some(&title_snippet), &doc, title, 150).unwrap();
         assert!(snippet.contains("离职"));
         Ok(())
     }
 
     #[test]
-    fn keyword_query_ignores_tags() -> Result<(), SearchIndexError> {
+    fn keyword_query_matches_tags() -> Result<(), SearchIndexError> {
         let schema = build_schema();
         let title = schema.get_field("title")?;
         let content = schema.get_field("content")?;
@@ -626,7 +660,7 @@ mod tests {
         };
         let built = build_query(&index, &fields, &search_query)?;
         let hits = searcher.search(&built.query, &TopDocs::with_limit(10))?;
-        assert!(hits.is_empty());
+        assert_eq!(hits.len(), 1);
         Ok(())
     }
 
@@ -669,6 +703,46 @@ mod tests {
         };
         let built = build_query(&index, &fields, &search_query)?;
         let searcher = index.reader_builder().try_into()?.searcher();
+        let hits = searcher.search(&built.query, &TopDocs::with_limit(10))?;
+        assert_eq!(hits.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn keyword_query_matches_category() -> Result<(), SearchIndexError> {
+        let schema = build_schema();
+        let title = schema.get_field("title")?;
+        let content = schema.get_field("content")?;
+        let category = schema.get_field("category")?;
+        let index = Index::create_in_ram(schema);
+        register_jieba_tokenizer(&index);
+
+        let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
+        writer.add_document(doc!(
+            title => "无关标题",
+            content => "无关正文",
+            category => "实验室"
+        ))?;
+        writer.commit()?;
+
+        let fields = SearchFields {
+            id: index.schema().get_field("id")?,
+            title,
+            content,
+            url: index.schema().get_field("url")?,
+            tags: index.schema().get_field("tags")?,
+            category,
+            published: index.schema().get_field("published")?,
+            updated: index.schema().get_field("updated")?,
+            checksum: index.schema().get_field("checksum")?,
+        };
+
+        let searcher = index.reader_builder().try_into()?.searcher();
+        let search_query = SearchQuery {
+            keywords: vec!["实验室".to_string()],
+            ..Default::default()
+        };
+        let built = build_query(&index, &fields, &search_query)?;
         let hits = searcher.search(&built.query, &TopDocs::with_limit(10))?;
         assert_eq!(hits.len(), 1);
         Ok(())

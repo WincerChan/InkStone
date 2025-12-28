@@ -34,12 +34,13 @@ Response:
 - `q` (required): search query string (max 256 chars, cannot be empty)
 - `limit` (optional): number of results to return (default: 20, max: `INKSTONE_MAX_SEARCH_LIMIT`)
 - `offset` (optional): pagination offset (default: 0)
+- `sort` (optional): `relevance` (default) or `latest` (order by updated date desc)
 
 ### Search query syntax
 
 Tokens are separated by whitespace and may be combined:
 
-- Keywords: `Python Linux`
+- Keywords: `Python Linux` (match title, content, tags, category)
 - Date range:
   - `range:2020-01-01~`
   - `range:~2020-01-01`
