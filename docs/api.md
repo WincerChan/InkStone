@@ -78,7 +78,13 @@ curl "http://127.0.0.1:8080/v2/search?q=Python%20range:2020-01-01~%20tags:Rust"
       "tags": ["Rust", "Search"],
       "category": "share",
       "published_at": "2025-01-01T00:00:00Z",
-      "updated_at": "2025-01-02T00:00:00Z"
+      "updated_at": "2025-01-02T00:00:00Z",
+      "matched": {
+        "title": true,
+        "content": true,
+        "tags": false,
+        "category": false
+      }
     }
   ]
 }
@@ -86,6 +92,7 @@ curl "http://127.0.0.1:8080/v2/search?q=Python%20range:2020-01-01~%20tags:Rust"
 
 Notes:
 - `title` and `content` contain highlighted snippets for keyword queries; `content` may be null when正文为空。
+- `matched` indicates which fields matched (snippet highlight + exact tag/category match).
 
 ### Error responses
 

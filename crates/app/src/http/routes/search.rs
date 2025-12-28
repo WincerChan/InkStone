@@ -9,7 +9,7 @@ use thiserror::Error;
 use tracing::{info, warn};
 
 use crate::state::AppState;
-use inkstone_core::domain::search::{SearchHit, SearchResult};
+use inkstone_core::domain::search::{SearchHit, SearchQuery, SearchResult};
 use inkstone_infra::search::{parse_query, QueryParseError, SearchIndexError, SearchSort};
 
 const MAX_QUERY_LEN: usize = 256;
@@ -54,8 +54,23 @@ impl SearchSortParam {
 #[derive(Debug, Serialize)]
 pub struct SearchResponse {
     pub total: usize,
-    pub hits: Vec<SearchHit>,
+    pub hits: Vec<SearchHitResponse>,
     pub elapsed_ms: u128,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SearchHitResponse {
+    #[serde(flatten)]
+    pub hit: SearchHit,
+    pub matched: MatchedFields,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct MatchedFields {
+    pub title: bool,
+    pub content: bool,
+    pub tags: bool,
+    pub category: bool,
 }
 
 #[derive(Debug, Error)]
@@ -129,9 +144,17 @@ pub async fn search(
         elapsed_ms = started_at.elapsed().as_millis(),
         "search request completed"
     );
+    let hits = result
+        .hits
+        .into_iter()
+        .map(|hit| SearchHitResponse {
+            matched: build_matched(&hit, &query),
+            hit,
+        })
+        .collect();
     Ok(Json(SearchResponse {
         total: result.total,
-        hits: result.hits,
+        hits,
         elapsed_ms: started_at.elapsed().as_millis(),
     }))
 }
@@ -141,6 +164,46 @@ fn enforce_query_length(query_text: &str) -> Result<(), SearchApiError> {
         return Err(SearchApiError::QueryTooLong(MAX_QUERY_LEN));
     }
     Ok(())
+}
+
+fn build_matched(hit: &SearchHit, query: &SearchQuery) -> MatchedFields {
+    let title = hit.title.contains("<b>");
+    let content = hit
+        .content
+        .as_deref()
+        .map(|value| value.contains("<b>"))
+        .unwrap_or(false);
+
+    let mut tags = false;
+    if !query.tags.is_empty() {
+        tags = query
+            .tags
+            .iter()
+            .any(|tag| hit.tags.iter().any(|hit_tag| hit_tag == tag));
+    }
+    if !tags && !query.keywords.is_empty() {
+        tags = query
+            .keywords
+            .iter()
+            .any(|keyword| hit.tags.iter().any(|tag| tag == keyword));
+    }
+
+    let mut category = false;
+    if let Some(query_category) = query.category.as_ref() {
+        category = hit.category.as_deref() == Some(query_category.as_str());
+    }
+    if !category {
+        if let Some(hit_category) = hit.category.as_deref() {
+            category = query.keywords.iter().any(|keyword| keyword == hit_category);
+        }
+    }
+
+    MatchedFields {
+        title,
+        content,
+        tags,
+        category,
+    }
 }
 
 impl IntoResponse for SearchApiError {
@@ -157,7 +220,12 @@ impl IntoResponse for SearchApiError {
 
 #[cfg(test)]
 mod tests {
-    use super::{enforce_query_length, SearchApiError, SearchSortParam, MAX_QUERY_LEN};
+    use super::{
+        build_matched, enforce_query_length, MatchedFields, SearchApiError, SearchSortParam,
+        MAX_QUERY_LEN,
+    };
+    use chrono::{TimeZone, Utc};
+    use inkstone_core::domain::search::{SearchHit, SearchQuery};
     use serde_json::json;
 
     #[test]
@@ -177,5 +245,61 @@ mod tests {
     fn sort_param_parses_latest() {
         let sort: SearchSortParam = serde_json::from_value(json!("latest")).unwrap();
         assert!(matches!(sort, SearchSortParam::Latest));
+    }
+
+    #[test]
+    fn matched_fields_detects_highlight_and_keyword_tags() {
+        let hit = SearchHit {
+            id: "id".to_string(),
+            title: "<b>实验室</b> 笔记".to_string(),
+            content: Some("正文内容".to_string()),
+            url: "https://example.com".to_string(),
+            tags: vec!["实验室".to_string()],
+            category: None,
+            published_at: Utc.timestamp_opt(1_700_000_000, 0).unwrap(),
+            updated_at: Utc.timestamp_opt(1_700_000_000, 0).unwrap(),
+        };
+        let query = SearchQuery {
+            keywords: vec!["实验室".to_string()],
+            ..Default::default()
+        };
+        let matched = build_matched(&hit, &query);
+        assert_eq!(
+            matched,
+            MatchedFields {
+                title: true,
+                content: false,
+                tags: true,
+                category: false
+            }
+        );
+    }
+
+    #[test]
+    fn matched_fields_detects_explicit_category_filter() {
+        let hit = SearchHit {
+            id: "id".to_string(),
+            title: "无关".to_string(),
+            content: None,
+            url: "https://example.com".to_string(),
+            tags: vec![],
+            category: Some("实验室".to_string()),
+            published_at: Utc.timestamp_opt(1_700_000_000, 0).unwrap(),
+            updated_at: Utc.timestamp_opt(1_700_000_000, 0).unwrap(),
+        };
+        let query = SearchQuery {
+            category: Some("实验室".to_string()),
+            ..Default::default()
+        };
+        let matched = build_matched(&hit, &query);
+        assert_eq!(
+            matched,
+            MatchedFields {
+                title: false,
+                content: false,
+                tags: false,
+                category: true
+            }
+        );
     }
 }
