@@ -69,7 +69,7 @@ pub struct SearchHitResponse {
 pub struct MatchedFields {
     pub title: bool,
     pub content: bool,
-    pub tags: bool,
+    pub tags: Vec<String>,
     pub category: bool,
 }
 
@@ -105,7 +105,7 @@ pub async fn search(
     }
     let limit = params
         .limit
-        .unwrap_or(20)
+        .unwrap_or(8)
         .min(state.config.max_search_limit);
     let offset = params.offset.unwrap_or(0);
     let sort = params.sort.unwrap_or_default();
@@ -174,18 +174,20 @@ fn build_matched(hit: &SearchHit, query: &SearchQuery) -> MatchedFields {
         .map(|value| value.contains("<b>"))
         .unwrap_or(false);
 
-    let mut tags = false;
-    if !query.tags.is_empty() {
-        tags = query
-            .tags
-            .iter()
-            .any(|tag| hit.tags.iter().any(|hit_tag| hit_tag == tag));
-    }
-    if !tags && !query.keywords.is_empty() {
-        tags = query
-            .keywords
-            .iter()
-            .any(|keyword| hit.tags.iter().any(|tag| tag == keyword));
+    let mut tag_matches = Vec::new();
+    if !hit.tags.is_empty() {
+        let mut candidates: Vec<&str> = Vec::new();
+        candidates.extend(query.tags.iter().map(|tag| tag.as_str()));
+        candidates.extend(query.keywords.iter().map(|keyword| keyword.as_str()));
+        if !candidates.is_empty() {
+            for hit_tag in &hit.tags {
+                if candidates.iter().any(|candidate| hit_tag == candidate) {
+                    if !tag_matches.contains(hit_tag) {
+                        tag_matches.push(hit_tag.clone());
+                    }
+                }
+            }
+        }
     }
 
     let mut category = false;
@@ -201,7 +203,7 @@ fn build_matched(hit: &SearchHit, query: &SearchQuery) -> MatchedFields {
     MatchedFields {
         title,
         content,
-        tags,
+        tags: tag_matches,
         category,
     }
 }
@@ -269,7 +271,7 @@ mod tests {
             MatchedFields {
                 title: true,
                 content: false,
-                tags: true,
+                tags: vec!["实验室".to_string()],
                 category: false
             }
         );
@@ -297,7 +299,7 @@ mod tests {
             MatchedFields {
                 title: false,
                 content: false,
-                tags: false,
+                tags: Vec::new(),
                 category: true
             }
         );

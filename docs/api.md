@@ -32,7 +32,7 @@ Response:
 ### Query parameters
 
 - `q` (required): search query string (max 256 chars, cannot be empty)
-- `limit` (optional): number of results to return (default: 20, max: `INKSTONE_MAX_SEARCH_LIMIT`)
+- `limit` (optional): number of results to return (default: 8, max: `INKSTONE_MAX_SEARCH_LIMIT`)
 - `offset` (optional): pagination offset (default: 0)
 - `sort` (optional): `relevance` (default) or `latest` (order by updated date desc)
 
@@ -82,7 +82,7 @@ curl "http://127.0.0.1:8080/v2/search?q=Python%20range:2020-01-01~%20tags:Rust"
       "matched": {
         "title": true,
         "content": true,
-        "tags": false,
+        "tags": ["Rust"],
         "category": false
       }
     }
@@ -92,7 +92,8 @@ curl "http://127.0.0.1:8080/v2/search?q=Python%20range:2020-01-01~%20tags:Rust"
 
 Notes:
 - `title` and `content` contain highlighted snippets for keyword queries; `content` may be null when正文为空。
-- `matched` indicates which fields matched (snippet highlight + exact tag/category match).
+- `matched.tags` lists exact tag matches from keywords or `tags:` filters.
+- `matched` indicates which fields matched (snippet highlight + exact category match).
 
 ### Error responses
 

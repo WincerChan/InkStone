@@ -91,10 +91,10 @@ impl SearchIndex {
         {
             let mut title_snippet =
                 SnippetGenerator::create(&searcher, &**keyword_query, self.fields.title)?;
-            title_snippet.set_max_num_chars(150);
+            title_snippet.set_max_num_chars(240);
             let mut content_snippet =
                 SnippetGenerator::create(&searcher, &**keyword_query, self.fields.content)?;
-            content_snippet.set_max_num_chars(150);
+            content_snippet.set_max_num_chars(240);
             (Some(title_snippet), Some(content_snippet))
         } else {
             (None, None)
@@ -202,9 +202,9 @@ impl SearchIndex {
 
         Ok(SearchHit {
             id,
-            title: snippet_or_excerpt(title_snippet, doc, self.fields.title, 150)
+            title: snippet_or_excerpt(title_snippet, doc, self.fields.title, 120)
                 .unwrap_or(title),
-            content: snippet_or_excerpt(content_snippet, doc, self.fields.content, 150),
+            content: snippet_or_excerpt(content_snippet, doc, self.fields.content, 120),
             url,
             tags,
             category,
@@ -532,9 +532,9 @@ mod tests {
 
         let keyword_query = built.keyword.as_ref().expect("keyword query");
         let mut title_snippet = SnippetGenerator::create(&searcher, &**keyword_query, title)?;
-        title_snippet.set_max_num_chars(150);
+        title_snippet.set_max_num_chars(240);
         let mut content_snippet = SnippetGenerator::create(&searcher, &**keyword_query, content)?;
-        content_snippet.set_max_num_chars(150);
+        content_snippet.set_max_num_chars(240);
         let title_html = title_snippet.snippet_from_doc(&doc).to_html();
         let content_html = content_snippet.snippet_from_doc(&doc).to_html();
         assert!(title_html.contains("售货员"));
@@ -618,8 +618,8 @@ mod tests {
 
         let keyword_query = built.keyword.as_ref().expect("keyword query");
         let mut title_snippet = SnippetGenerator::create(&searcher, &**keyword_query, title)?;
-        title_snippet.set_max_num_chars(150);
-        let snippet = snippet_or_excerpt(Some(&title_snippet), &doc, title, 150).unwrap();
+        title_snippet.set_max_num_chars(240);
+        let snippet = snippet_or_excerpt(Some(&title_snippet), &doc, title, 120).unwrap();
         assert!(snippet.contains("离职"));
         Ok(())
     }
