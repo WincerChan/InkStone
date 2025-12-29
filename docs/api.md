@@ -4,26 +4,6 @@ Base URL: `http://127.0.0.1:8080`
 
 API prefix: `/v2` (except `/health` and `/webhook/github`)
 
-## Health
-
-`GET /health`
-
-Response:
-
-```json
-{
-  "status": "ok",
-  "modules": {
-    "search": { "enabled": true },
-    "database": { "configured": true },
-    "kudos": { "enabled": true, "cookie_ready": true, "valid_paths_loaded": true },
-    "pulse": { "enabled": true, "cookie_ready": true },
-    "douban": { "enabled": true },
-    "valid_paths": { "loaded": true, "count": 123 },
-    "webhook": { "configured": true }
-  }
-}
-```
 
 ## Search
 
@@ -155,78 +135,6 @@ Error body:
 }
 ```
 
-## Pulse (analytics)
-
-`POST /v2/pulse/pv`
-
-Records a page view (without duration). The server sets a `bid` cookie if missing.
-Accepts `application/json` or `text/plain` (JSON string) to reduce CORS preflight.
-
-Request body:
-
-```json
-{
-  "page_instance_id": "uuid",
-  "path": "/posts/hello/"
-}
-```
-
-Notes:
-
-- `path` must exist in `valid_paths.txt`, otherwise `404` is returned.
-- `ua_family`, `device`, `source_type`, `ref_host`, and `country` are derived from request headers.
-- `country` uses `CF-IPCountry` if present; otherwise the first `X-Forwarded-For` IP.
-
-`POST /v2/pulse/engage`
-
-Upserts engagement duration for the page instance.
-Accepts `application/json` or `text/plain` (JSON string) to reduce CORS preflight.
-
-Request body:
-
-```json
-{
-  "page_instance_id": "uuid",
-  "duration_ms": 120000
-}
-```
-
-Responses:
-
-- `204 No Content`: success
-- `400 Bad Request`: missing/invalid fields
-- `404 Not Found`: path not in valid list (pv only)
-- `503 Service Unavailable`: valid paths not loaded, cookie secrets missing, or DB not configured
-- `500 Internal Server Error`: database error
-
-Error body:
-
-```json
-{
-  "error": "message"
-}
-```
-
-## GitHub webhook
-
-`POST /webhook/github`
-
-Handles GitHub `check_run` events and refreshes `atom.xml` + `valid_paths.txt` on successful
-completed checks. `ping` events return `204`. Requires `INKSTONE_GITHUB_WEBHOOK_SECRET`.
-Refresh is queued asynchronously; failures enter a 60-second per-task backoff.
-
-Headers:
-
-- `X-GitHub-Event` (required)
-- `X-Hub-Signature-256` (required, `sha256=<hex>`)
-
-Responses:
-
-- `204 No Content`: `ping` handled
-- `202 Accepted`: event ignored or refresh queued
-- `400 Bad Request`: missing headers or invalid payload
-- `401 Unauthorized`: invalid signature
-- `503 Service Unavailable`: webhook secret not configured
 
 ## Douban marks (current year)
 
