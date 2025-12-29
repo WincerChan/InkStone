@@ -111,6 +111,7 @@ Response:
     {
       "id": "DIC_kwDO...",
       "url": "https://github.com/owner/repo/discussions/12#discussioncomment-1",
+      "source": "github",
       "author_login": "octocat",
       "author_url": "https://github.com/octocat",
       "author_avatar_url": "https://avatars.githubusercontent.com/u/583231?v=4",
@@ -121,6 +122,7 @@ Response:
         {
           "id": "DIC_kwDO...",
           "url": "https://github.com/owner/repo/discussions/12#discussioncomment-2",
+          "source": "github",
           "author_login": "octocat",
           "author_url": "https://github.com/octocat",
           "author_avatar_url": "https://avatars.githubusercontent.com/u/583231?v=4",

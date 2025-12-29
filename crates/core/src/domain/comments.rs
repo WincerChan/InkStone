@@ -5,6 +5,7 @@ use serde::Serialize;
 pub struct Comment {
     pub id: String,
     pub url: String,
+    pub source: String,
     pub author_login: Option<String>,
     pub author_url: Option<String>,
     pub author_avatar_url: Option<String>,

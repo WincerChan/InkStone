@@ -82,6 +82,7 @@ fn build_comment_tree(records: &[inkstone_infra::db::CommentRecord]) -> Vec<Comm
         let comment = Comment {
             id: record.comment_id.clone(),
             url: record.comment_url.clone(),
+            source: record.source.clone(),
             author_login: record.author_login.clone(),
             author_url: record.author_url.clone(),
             author_avatar_url: record.author_avatar_url.clone(),
