@@ -63,8 +63,6 @@ pub async fn run(state: &AppState, rebuild: bool) -> Result<CommentsSyncStats, J
 
     let mut stats = CommentsSyncStats::default();
     let posts = fetch_posts(state).await?;
-    // Temporary: limit sync to the first two posts for manual verification.
-    let posts = apply_post_limit(posts, 2);
     stats.posts_seen = posts.len();
 
     for post in posts {
@@ -291,7 +289,7 @@ async fn fetch_posts(state: &AppState) -> Result<Vec<PostRef>, JobError> {
             posts.push(post);
         }
     }
-    Ok(posts)
+    Ok(add_special_pages(posts))
 }
 
 fn post_from_index_entry(entry: &SearchIndexEntry, base_url: Option<&str>) -> Option<PostRef> {
@@ -305,6 +303,35 @@ fn post_from_index_entry(entry: &SearchIndexEntry, base_url: Option<&str>) -> Op
         title: entry.title.trim().to_string(),
         summary: summary_from_entry(entry),
     })
+}
+
+const SPECIAL_PAGES: [&str; 6] = [
+    "/life/",
+    "/life-en/",
+    "/about/",
+    "/about-en/",
+    "/friends/",
+    "/friends-en/",
+];
+
+fn add_special_pages(mut posts: Vec<PostRef>) -> Vec<PostRef> {
+    let mut seen = std::collections::HashSet::new();
+    for post in &posts {
+        seen.insert(post.post_id.clone());
+    }
+    for path in SPECIAL_PAGES {
+        if seen.insert(path.to_string()) {
+            let slug = path.trim_matches('/').to_string();
+            posts.push(PostRef {
+                post_id: path.to_string(),
+                slug,
+                url: format!("{}{}", BLOG_BASE_URL, path),
+                title: path.to_string(),
+                summary: None,
+            });
+        }
+    }
+    posts
 }
 
 fn title_candidates(post: &PostRef) -> Vec<String> {
@@ -402,6 +429,8 @@ fn resolve_entry_url(url: &str, base_url: Option<&str>) -> String {
     format!("{base}/{url}")
 }
 
+const BLOG_BASE_URL: &str = "https://blog.itswincer.com";
+
 fn build_discussion_body(post: &PostRef) -> String {
     let mut lines = Vec::new();
     lines.push(format!("## {}", post.title.trim()));
@@ -413,7 +442,7 @@ fn build_discussion_body(post: &PostRef) -> String {
         }
     }
     lines.push("\n---".to_string());
-    lines.push(post.url.clone());
+    lines.push(format!("{}{}", BLOG_BASE_URL, post.post_id));
     lines.join("\n")
 }
 
@@ -531,14 +560,6 @@ impl CommentsConfig {
     }
 }
 
-fn apply_post_limit(mut posts: Vec<PostRef>, limit: usize) -> Vec<PostRef> {
-    if limit == 0 || posts.len() <= limit {
-        return posts;
-    }
-    posts.truncate(limit);
-    posts
-}
-
 #[cfg(test)]
 mod tests {
     use super::{SearchIndexEntry, path_from_url, slug_from_path, title_candidates};
@@ -580,32 +601,22 @@ mod tests {
     }
 
     #[test]
-    fn apply_post_limit_truncates() {
-        let posts = vec![
-            super::PostRef {
-                post_id: "/posts/a/".to_string(),
-                slug: "a".to_string(),
-                url: "https://example.com/posts/a/".to_string(),
-                title: "a".to_string(),
-                summary: None,
-            },
-            super::PostRef {
-                post_id: "/posts/b/".to_string(),
-                slug: "b".to_string(),
-                url: "https://example.com/posts/b/".to_string(),
-                title: "b".to_string(),
-                summary: None,
-            },
-            super::PostRef {
-                post_id: "/posts/c/".to_string(),
-                slug: "c".to_string(),
-                url: "https://example.com/posts/c/".to_string(),
-                title: "c".to_string(),
-                summary: None,
-            },
-        ];
-        let limited = super::apply_post_limit(posts, 2);
-        assert_eq!(limited.len(), 2);
+    fn add_special_pages_dedupes() {
+        let posts = vec![super::PostRef {
+            post_id: "/life/".to_string(),
+            slug: "life".to_string(),
+            url: "https://example.com/life/".to_string(),
+            title: "/life/".to_string(),
+            summary: None,
+        }];
+        let updated = super::add_special_pages(posts);
+        let life_count = updated
+            .iter()
+            .filter(|post| post.post_id == "/life/")
+            .count();
+        assert_eq!(life_count, 1);
+        assert!(updated.iter().any(|post| post.post_id == "/about/"));
+        assert!(updated.iter().any(|post| post.post_id == "/friends-en/"));
     }
 
     #[test]
@@ -621,7 +632,7 @@ mod tests {
         assert!(body.contains("## Hello World"));
         assert!(body.contains("Hello World"));
         assert!(body.contains("---"));
-        assert!(body.contains("https://example.com/posts/hello-world/"));
+        assert!(body.contains("https://blog.itswincer.com/posts/hello-world/"));
     }
 
     #[test]
