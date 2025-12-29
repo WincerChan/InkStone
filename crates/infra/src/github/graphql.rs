@@ -46,8 +46,10 @@ pub struct DiscussionInfo {
 #[derive(Debug, Clone)]
 pub struct DiscussionComment {
     pub id: String,
+    pub url: String,
     pub author_login: Option<String>,
     pub author_url: Option<String>,
+    pub author_avatar_url: Option<String>,
     pub body_html: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -119,17 +121,19 @@ impl GithubAppClient {
                   comments(first: 100) {
                     nodes {
                       id
+                      url
                       bodyHTML
                       createdAt
                       updatedAt
-                      author { login url }
+                      author { login url avatarUrl }
                       replies(first: 100) {
                         nodes {
                           id
+                          url
                           bodyHTML
                           createdAt
                           updatedAt
-                          author { login url }
+                          author { login url avatarUrl }
                         }
                       }
                     }
@@ -362,6 +366,7 @@ struct CommentConnection {
 #[derive(Debug, Deserialize)]
 struct CommentNode {
     id: String,
+    url: String,
     #[serde(rename = "bodyHTML")]
     body_html: String,
     #[serde(rename = "createdAt")]
@@ -380,6 +385,7 @@ struct ReplyConnection {
 #[derive(Debug, Deserialize)]
 struct ReplyNode {
     id: String,
+    url: String,
     #[serde(rename = "bodyHTML")]
     body_html: String,
     #[serde(rename = "createdAt")]
@@ -393,6 +399,8 @@ struct ReplyNode {
 struct AuthorNode {
     login: Option<String>,
     url: Option<String>,
+    #[serde(rename = "avatarUrl")]
+    avatar_url: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -449,8 +457,13 @@ fn map_comment(node: CommentNode) -> Result<DiscussionComment, GithubError> {
     }
     Ok(DiscussionComment {
         id: node.id,
+        url: node.url,
         author_login: node.author.as_ref().and_then(|author| author.login.clone()),
         author_url: node.author.as_ref().and_then(|author| author.url.clone()),
+        author_avatar_url: node
+            .author
+            .as_ref()
+            .and_then(|author| author.avatar_url.clone()),
         body_html: node.body_html,
         created_at,
         updated_at,
@@ -463,8 +476,13 @@ fn map_reply(node: ReplyNode) -> Result<DiscussionComment, GithubError> {
     let updated_at = parse_datetime(&node.updated_at)?;
     Ok(DiscussionComment {
         id: node.id,
+        url: node.url,
         author_login: node.author.as_ref().and_then(|author| author.login.clone()),
         author_url: node.author.as_ref().and_then(|author| author.url.clone()),
+        author_avatar_url: node
+            .author
+            .as_ref()
+            .and_then(|author| author.avatar_url.clone()),
         body_html: node.body_html,
         created_at,
         updated_at,

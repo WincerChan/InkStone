@@ -4,8 +4,10 @@ use serde::Serialize;
 #[derive(Debug, Clone, Serialize)]
 pub struct Comment {
     pub id: String,
+    pub url: String,
     pub author_login: Option<String>,
     pub author_url: Option<String>,
+    pub author_avatar_url: Option<String>,
     pub body_html: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

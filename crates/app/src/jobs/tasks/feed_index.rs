@@ -135,6 +135,12 @@ fn entry_to_document_from_json(
     let content_raw = sanitize_markdown(&entry.content);
     let content = normalize_whitespace(&content_raw);
 
+    let subtitle = entry
+        .subtitle
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(normalize_whitespace);
     let category = entry
         .category
         .as_deref()
@@ -153,6 +159,7 @@ fn entry_to_document_from_json(
     let checksum = compute_checksum(
         &doc_id,
         title,
+        subtitle.as_deref().unwrap_or(""),
         &content,
         &url,
         &tags,
@@ -164,6 +171,7 @@ fn entry_to_document_from_json(
     Ok(SearchDocument {
         id: doc_id,
         title: title.to_string(),
+        subtitle,
         content,
         url,
         tags,
@@ -206,6 +214,7 @@ fn parse_datetime(value: &str) -> Result<DateTime<Utc>, EntryError> {
 fn compute_checksum(
     id: &str,
     title: &str,
+    subtitle: &str,
     content: &str,
     url: &str,
     tags: &[String],
@@ -217,6 +226,8 @@ fn compute_checksum(
     hasher.update(id.as_bytes());
     hasher.update([0]);
     hasher.update(title.as_bytes());
+    hasher.update([0]);
+    hasher.update(subtitle.as_bytes());
     hasher.update([0]);
     hasher.update(content.as_bytes());
     hasher.update([0]);

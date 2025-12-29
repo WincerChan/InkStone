@@ -24,8 +24,10 @@ pub struct CommentRecord {
     pub discussion_id: String,
     pub comment_id: String,
     pub parent_id: Option<String>,
+    pub comment_url: String,
     pub author_login: Option<String>,
     pub author_url: Option<String>,
+    pub author_avatar_url: Option<String>,
     pub body_html: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -139,8 +141,10 @@ pub async fn list_comments(
         SELECT discussion_id,
                comment_id,
                parent_id,
+               comment_url,
                author_login,
                author_url,
+               author_avatar_url,
                body_html,
                created_at,
                updated_at
@@ -158,8 +162,10 @@ pub async fn list_comments(
             discussion_id: row.try_get("discussion_id")?,
             comment_id: row.try_get("comment_id")?,
             parent_id: row.try_get("parent_id")?,
+            comment_url: row.try_get("comment_url")?,
             author_login: row.try_get("author_login")?,
             author_url: row.try_get("author_url")?,
+            author_avatar_url: row.try_get("author_avatar_url")?,
             body_html: row.try_get("body_html")?,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
@@ -194,20 +200,24 @@ async fn insert_comment(
             discussion_id,
             comment_id,
             parent_id,
+            comment_url,
             author_login,
             author_url,
+            author_avatar_url,
             body_html,
             created_at,
             updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         "#,
     )
     .bind(&comment.discussion_id)
     .bind(&comment.comment_id)
     .bind(&comment.parent_id)
+    .bind(&comment.comment_url)
     .bind(&comment.author_login)
     .bind(&comment.author_url)
+    .bind(&comment.author_avatar_url)
     .bind(&comment.body_html)
     .bind(comment.created_at)
     .bind(comment.updated_at)

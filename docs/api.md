@@ -53,6 +53,7 @@ curl "http://127.0.0.1:8080/v2/search?q=Python%20range:2020-01-01~%20tags:Rust"
     {
       "id": "urn:uuid:...",
       "title": "<b>Example</b> title snippet",
+      "subtitle": "<b>Example</b> subtitle snippet",
       "content": "<b>Example</b> content snippet",
       "url": "https://blog.example.com/posts/example",
       "tags": ["Rust", "Search"],
@@ -61,6 +62,7 @@ curl "http://127.0.0.1:8080/v2/search?q=Python%20range:2020-01-01~%20tags:Rust"
       "updated_at": "2025-01-02T00:00:00Z",
       "matched": {
         "title": true,
+        "subtitle": false,
         "content": true,
         "tags": ["Rust"],
         "category": false
@@ -71,8 +73,9 @@ curl "http://127.0.0.1:8080/v2/search?q=Python%20range:2020-01-01~%20tags:Rust"
 ```
 
 Notes:
-- `title` and `content` contain highlighted snippets for keyword queries; `content` may be null when正文为空。
+- `title`, `subtitle`, and `content` contain highlighted snippets for keyword queries; `content` may be null when正文为空。
 - `matched.tags` lists exact tag matches from keywords or `tags:` filters.
+- `matched.subtitle` indicates matches inside subtitle text.
 - `matched` indicates which fields matched (snippet highlight + exact category match).
 
 ### Error responses
@@ -107,16 +110,20 @@ Response:
   "comments": [
     {
       "id": "DIC_kwDO...",
+      "url": "https://github.com/owner/repo/discussions/12#discussioncomment-1",
       "author_login": "octocat",
       "author_url": "https://github.com/octocat",
+      "author_avatar_url": "https://avatars.githubusercontent.com/u/583231?v=4",
       "body_html": "<p>First comment</p>",
       "created_at": "2025-01-01T00:00:00Z",
       "updated_at": "2025-01-01T00:00:00Z",
       "replies": [
         {
           "id": "DIC_kwDO...",
+          "url": "https://github.com/owner/repo/discussions/12#discussioncomment-2",
           "author_login": "octocat",
           "author_url": "https://github.com/octocat",
+          "author_avatar_url": "https://avatars.githubusercontent.com/u/583231?v=4",
           "body_html": "<p>Reply</p>",
           "created_at": "2025-01-01T00:01:00Z",
           "updated_at": "2025-01-01T00:01:00Z",
@@ -132,6 +139,7 @@ Notes:
 - `discussion_url` is null when the post has no discussion yet.
 - `post_id` must start with `/` and cannot contain whitespace.
 - Discussion titles are mapped to paths: `hello-world` -> `/posts/hello-world/`. For special pages, set the discussion title to the full path (e.g. `/life/`). Legacy titles like `posts/hello-world` are supported.
+- TODO: comment reactions may be added later (pending evaluation to avoid overlap with kudos).
 
 Error responses:
 

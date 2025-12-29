@@ -38,6 +38,7 @@ pub enum SearchIndexError {
 struct SearchFields {
     id: Field,
     title: Field,
+    subtitle: Field,
     content: Field,
     url: Field,
     tags: Field,
@@ -87,18 +88,21 @@ impl SearchIndex {
     ) -> Result<SearchResult, SearchIndexError> {
         let searcher = self.reader.searcher();
         let built_query = build_query(&self.index, &self.fields, query)?;
-        let (title_snippet, content_snippet) = if let Some(keyword_query) = built_query.keyword.as_ref()
-        {
-            let mut title_snippet =
-                SnippetGenerator::create(&searcher, &**keyword_query, self.fields.title)?;
-            title_snippet.set_max_num_chars(240);
-            let mut content_snippet =
-                SnippetGenerator::create(&searcher, &**keyword_query, self.fields.content)?;
-            content_snippet.set_max_num_chars(240);
-            (Some(title_snippet), Some(content_snippet))
-        } else {
-            (None, None)
-        };
+        let (title_snippet, subtitle_snippet, content_snippet) =
+            if let Some(keyword_query) = built_query.keyword.as_ref() {
+                let mut title_snippet =
+                    SnippetGenerator::create(&searcher, &**keyword_query, self.fields.title)?;
+                title_snippet.set_max_num_chars(240);
+                let mut subtitle_snippet =
+                    SnippetGenerator::create(&searcher, &**keyword_query, self.fields.subtitle)?;
+                subtitle_snippet.set_max_num_chars(240);
+                let mut content_snippet =
+                    SnippetGenerator::create(&searcher, &**keyword_query, self.fields.content)?;
+                content_snippet.set_max_num_chars(240);
+                (Some(title_snippet), Some(subtitle_snippet), Some(content_snippet))
+            } else {
+                (None, None, None)
+            };
         let total = searcher.search(&built_query.query, &Count)?;
         let docs: Vec<DocAddress> = match sort {
             SearchSort::Relevance => searcher
@@ -126,6 +130,7 @@ impl SearchIndex {
             hits.push(self.document_to_hit(
                 &doc,
                 title_snippet.as_ref(),
+                subtitle_snippet.as_ref(),
                 content_snippet.as_ref(),
             )?);
         }
@@ -170,6 +175,9 @@ impl SearchIndex {
         let mut document = TantivyDocument::default();
         document.add_text(self.fields.id, &doc.id);
         document.add_text(self.fields.title, &doc.title);
+        if let Some(subtitle) = &doc.subtitle {
+            document.add_text(self.fields.subtitle, subtitle);
+        }
         document.add_text(self.fields.content, &doc.content);
         document.add_text(self.fields.url, &doc.url);
         for tag in &doc.tags {
@@ -188,6 +196,7 @@ impl SearchIndex {
         &self,
         doc: &TantivyDocument,
         title_snippet: Option<&SnippetGenerator>,
+        subtitle_snippet: Option<&SnippetGenerator>,
         content_snippet: Option<&SnippetGenerator>,
     ) -> Result<SearchHit, SearchIndexError> {
         let title = get_string(doc, self.fields.title).ok_or(SearchIndexError::MissingValue("title"))?;
@@ -204,6 +213,7 @@ impl SearchIndex {
             id,
             title: snippet_or_excerpt(title_snippet, doc, self.fields.title, 120)
                 .unwrap_or(title),
+            subtitle: snippet_html(subtitle_snippet, doc),
             content: snippet_or_excerpt(content_snippet, doc, self.fields.content, 120),
             url,
             tags,
@@ -223,6 +233,9 @@ impl SearchFields {
             title: schema
                 .get_field("title")
                 .map_err(|_| SearchIndexError::MissingField("title"))?,
+            subtitle: schema
+                .get_field("subtitle")
+                .map_err(|_| SearchIndexError::MissingField("subtitle"))?,
             content: schema
                 .get_field("content")
                 .map_err(|_| SearchIndexError::MissingField("content"))?,
@@ -252,6 +265,7 @@ fn build_schema() -> Schema {
     let mut builder = SchemaBuilder::default();
     builder.add_text_field("id", STRING | STORED);
     builder.add_text_field("title", jieba_text_options(true));
+    builder.add_text_field("subtitle", jieba_text_options(true));
     builder.add_text_field("content", jieba_text_options(true));
     builder.add_text_field("url", STRING | STORED);
     builder.add_text_field("tags", STRING | STORED);
@@ -352,9 +366,13 @@ fn build_keyword_query(
     for keyword in &query.keywords {
         let tokens = tokenize_keyword(&mut analyzer, keyword);
         let title_query = build_field_query(fields.title, &tokens);
+        let subtitle_query = build_field_query(fields.subtitle, &tokens);
         let content_query = build_field_query(fields.content, &tokens);
         let mut clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
         if let Some(query) = title_query {
+            clauses.push((Occur::Should, query));
+        }
+        if let Some(query) = subtitle_query {
             clauses.push((Occur::Should, query));
         }
         if let Some(query) = content_query {
@@ -507,6 +525,7 @@ mod tests {
     fn jieba_tokenizer_searches_chinese() -> Result<(), SearchIndexError> {
         let schema = build_schema();
         let title = schema.get_field("title")?;
+        let subtitle = schema.get_field("subtitle")?;
         let content = schema.get_field("content")?;
         let index = Index::create_in_ram(schema);
         register_jieba_tokenizer(&index);
@@ -514,6 +533,7 @@ mod tests {
         let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
         writer.add_document(doc!(
             title => "张华考上了北京大学；我在百货公司当售货员",
+            subtitle => "副标题无关内容",
             content => "百货公司里有一个售货员正在忙碌。"
         ))?;
         writer.commit()?;
@@ -567,6 +587,7 @@ mod tests {
     fn jieba_searches_three_years_phrase_in_title() -> Result<(), SearchIndexError> {
         let schema = build_schema();
         let title = schema.get_field("title")?;
+        let subtitle = schema.get_field("subtitle")?;
         let content = schema.get_field("content")?;
         let index = Index::create_in_ram(schema);
         register_jieba_tokenizer(&index);
@@ -574,6 +595,7 @@ mod tests {
         let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
         writer.add_document(doc!(
             title => "离职，三年未满",
+            subtitle => "副标题",
             content => "正文"
         ))?;
         writer.commit()?;
@@ -591,9 +613,39 @@ mod tests {
     }
 
     #[test]
+    fn keyword_query_matches_subtitle() -> Result<(), SearchIndexError> {
+        let schema = build_schema();
+        let title = schema.get_field("title")?;
+        let subtitle = schema.get_field("subtitle")?;
+        let content = schema.get_field("content")?;
+        let index = Index::create_in_ram(schema);
+        register_jieba_tokenizer(&index);
+
+        let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
+        writer.add_document(doc!(
+            title => "无关标题",
+            subtitle => "这里有关键词",
+            content => "无关正文"
+        ))?;
+        writer.commit()?;
+
+        let fields = SearchFields::from_schema(&index.schema())?;
+        let searcher = index.reader()?.searcher();
+        let search_query = SearchQuery {
+            keywords: vec!["关键词".to_string()],
+            ..Default::default()
+        };
+        let built = build_query(&index, &fields, &search_query)?;
+        let top_docs = searcher.search(&built.query, &TopDocs::with_limit(5))?;
+        assert!(!top_docs.is_empty());
+        Ok(())
+    }
+
+    #[test]
     fn title_snippet_falls_back_to_title_text() -> Result<(), SearchIndexError> {
         let schema = build_schema();
         let title = schema.get_field("title")?;
+        let subtitle = schema.get_field("subtitle")?;
         let content = schema.get_field("content")?;
         let index = Index::create_in_ram(schema);
         register_jieba_tokenizer(&index);
@@ -601,6 +653,7 @@ mod tests {
         let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
         writer.add_document(doc!(
             title => "离职，三年未满",
+            subtitle => "副标题",
             content => "正文"
         ))?;
         writer.commit()?;
@@ -628,6 +681,7 @@ mod tests {
     fn keyword_query_matches_tags() -> Result<(), SearchIndexError> {
         let schema = build_schema();
         let title = schema.get_field("title")?;
+        let subtitle = schema.get_field("subtitle")?;
         let content = schema.get_field("content")?;
         let tags = schema.get_field("tags")?;
         let index = Index::create_in_ram(schema);
@@ -644,6 +698,7 @@ mod tests {
         let fields = SearchFields {
             id: index.schema().get_field("id")?,
             title,
+            subtitle,
             content,
             url: index.schema().get_field("url")?,
             tags,
@@ -668,6 +723,7 @@ mod tests {
     fn range_query_matches_updated() -> Result<(), SearchIndexError> {
         let schema = build_schema();
         let title = schema.get_field("title")?;
+        let subtitle = schema.get_field("subtitle")?;
         let content = schema.get_field("content")?;
         let published = schema.get_field("published")?;
         let updated = schema.get_field("updated")?;
@@ -686,6 +742,7 @@ mod tests {
         let fields = SearchFields {
             id: index.schema().get_field("id")?,
             title,
+            subtitle,
             content,
             url: index.schema().get_field("url")?,
             tags: index.schema().get_field("tags")?,
@@ -712,6 +769,7 @@ mod tests {
     fn keyword_query_matches_category() -> Result<(), SearchIndexError> {
         let schema = build_schema();
         let title = schema.get_field("title")?;
+        let subtitle = schema.get_field("subtitle")?;
         let content = schema.get_field("content")?;
         let category = schema.get_field("category")?;
         let index = Index::create_in_ram(schema);
@@ -728,6 +786,7 @@ mod tests {
         let fields = SearchFields {
             id: index.schema().get_field("id")?,
             title,
+            subtitle,
             content,
             url: index.schema().get_field("url")?,
             tags: index.schema().get_field("tags")?,

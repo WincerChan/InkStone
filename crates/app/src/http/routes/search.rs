@@ -68,6 +68,7 @@ pub struct SearchHitResponse {
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct MatchedFields {
     pub title: bool,
+    pub subtitle: bool,
     pub content: bool,
     pub tags: Vec<String>,
     pub category: bool,
@@ -168,6 +169,11 @@ fn enforce_query_length(query_text: &str) -> Result<(), SearchApiError> {
 
 fn build_matched(hit: &SearchHit, query: &SearchQuery) -> MatchedFields {
     let title = hit.title.contains("<b>");
+    let subtitle = hit
+        .subtitle
+        .as_deref()
+        .map(|value| value.contains("<b>"))
+        .unwrap_or(false);
     let content = hit
         .content
         .as_deref()
@@ -202,6 +208,7 @@ fn build_matched(hit: &SearchHit, query: &SearchQuery) -> MatchedFields {
 
     MatchedFields {
         title,
+        subtitle,
         content,
         tags: tag_matches,
         category,
@@ -254,6 +261,7 @@ mod tests {
         let hit = SearchHit {
             id: "id".to_string(),
             title: "<b>实验室</b> 笔记".to_string(),
+            subtitle: Some("副标题".to_string()),
             content: Some("正文内容".to_string()),
             url: "https://example.com".to_string(),
             tags: vec!["实验室".to_string()],
@@ -270,6 +278,7 @@ mod tests {
             matched,
             MatchedFields {
                 title: true,
+                subtitle: false,
                 content: false,
                 tags: vec!["实验室".to_string()],
                 category: false
@@ -282,6 +291,7 @@ mod tests {
         let hit = SearchHit {
             id: "id".to_string(),
             title: "无关".to_string(),
+            subtitle: None,
             content: None,
             url: "https://example.com".to_string(),
             tags: vec![],
@@ -298,6 +308,7 @@ mod tests {
             matched,
             MatchedFields {
                 title: false,
+                subtitle: false,
                 content: false,
                 tags: Vec::new(),
                 category: true

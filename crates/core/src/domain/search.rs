@@ -15,6 +15,7 @@ pub struct SearchQuery {
 pub struct SearchDocument {
     pub id: String,
     pub title: String,
+    pub subtitle: Option<String>,
     pub content: String,
     pub url: String,
     pub tags: Vec<String>,
@@ -28,6 +29,7 @@ pub struct SearchDocument {
 pub struct SearchHit {
     pub id: String,
     pub title: String,
+    pub subtitle: Option<String>,
     pub content: Option<String>,
     pub url: String,
     pub tags: Vec<String>,

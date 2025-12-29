@@ -81,8 +81,10 @@ fn build_comment_tree(records: &[inkstone_infra::db::CommentRecord]) -> Vec<Comm
     for record in records {
         let comment = Comment {
             id: record.comment_id.clone(),
+            url: record.comment_url.clone(),
             author_login: record.author_login.clone(),
             author_url: record.author_url.clone(),
+            author_avatar_url: record.author_avatar_url.clone(),
             body_html: record.body_html.clone(),
             created_at: record.created_at,
             updated_at: record.updated_at,
@@ -162,8 +164,11 @@ mod tests {
                 discussion_id: "d1".to_string(),
                 comment_id: "c1".to_string(),
                 parent_id: None,
+                comment_url: "https://github.com/owner/repo/discussions/1#discussioncomment-1"
+                    .to_string(),
                 author_login: None,
                 author_url: None,
+                author_avatar_url: None,
                 body_html: "root".to_string(),
                 created_at: Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap(),
                 updated_at: Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap(),
@@ -172,8 +177,11 @@ mod tests {
                 discussion_id: "d1".to_string(),
                 comment_id: "c2".to_string(),
                 parent_id: Some("c1".to_string()),
+                comment_url: "https://github.com/owner/repo/discussions/1#discussioncomment-2"
+                    .to_string(),
                 author_login: None,
                 author_url: None,
+                author_avatar_url: None,
                 body_html: "reply".to_string(),
                 created_at: Utc.with_ymd_and_hms(2024, 1, 1, 0, 1, 0).unwrap(),
                 updated_at: Utc.with_ymd_and_hms(2024, 1, 1, 0, 1, 0).unwrap(),

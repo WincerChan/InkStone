@@ -1,0 +1,2 @@
+ALTER TABLE comment_items
+    ADD COLUMN IF NOT EXISTS comment_url TEXT NOT NULL DEFAULT '';
