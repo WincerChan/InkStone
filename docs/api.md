@@ -138,6 +138,7 @@ Response:
 Notes:
 - `discussion_url` is null when the post has no discussion yet.
 - `post_id` must start with `/` and cannot contain whitespace.
+- Comments are ordered by `created_at` descending (newest first), including replies.
 - Discussion titles are mapped to paths: `hello-world` -> `/posts/hello-world/`. For special pages, set the discussion title to the full path (e.g. `/life/`). Legacy titles like `posts/hello-world` are supported.
 - TODO: comment reactions may be added later (pending evaluation to avoid overlap with kudos).
 

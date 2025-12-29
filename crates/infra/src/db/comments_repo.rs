@@ -150,7 +150,7 @@ pub async fn list_comments(
                updated_at
         FROM comment_items
         WHERE discussion_id = $1
-        ORDER BY created_at ASC
+        ORDER BY created_at DESC
         "#,
     )
     .bind(discussion_id)
