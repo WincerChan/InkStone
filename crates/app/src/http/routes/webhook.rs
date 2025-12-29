@@ -40,6 +40,16 @@ struct CheckRun {
     conclusion: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct DiscussionWebhookPayload {
+    discussion: Option<DiscussionPayload>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DiscussionPayload {
+    node_id: Option<String>,
+}
+
 pub async fn github_webhook(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -89,6 +99,67 @@ pub async fn github_webhook(
         match tasks::content_refresh::run(&state, false, true).await {
             Ok(stats) => info!(?stats, "content refresh run complete"),
             Err(err) => warn!(error = %err, "content refresh run failed"),
+        }
+    });
+
+    Ok(StatusCode::ACCEPTED)
+}
+
+pub async fn github_discussion_webhook(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<StatusCode, WebhookError> {
+    let secret = state
+        .config
+        .github_discussion_webhook_secret
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            warn!("github discussion webhook secret missing");
+            WebhookError::SecretUnavailable
+        })?;
+    let event = header_value(&headers, HEADER_EVENT).ok_or_else(|| {
+        warn!("github discussion webhook missing event header");
+        WebhookError::MissingEvent
+    })?;
+    let signature = header_value(&headers, HEADER_SIGNATURE).ok_or_else(|| {
+        warn!(event, "github discussion webhook missing signature header");
+        WebhookError::MissingSignature
+    })?;
+    if !verify_signature(secret, &body, signature) {
+        warn!(event, "github discussion webhook invalid signature");
+        return Err(WebhookError::InvalidSignature);
+    }
+
+    if event.eq_ignore_ascii_case("ping") {
+        info!("github discussion webhook ping received");
+        return Ok(StatusCode::NO_CONTENT);
+    }
+    if !event.eq_ignore_ascii_case("discussion")
+        && !event.eq_ignore_ascii_case("discussion_comment")
+    {
+        return Ok(StatusCode::ACCEPTED);
+    }
+
+    let payload: DiscussionWebhookPayload = serde_json::from_slice(&body).map_err(|_| {
+        warn!(event, "github discussion webhook invalid payload");
+        WebhookError::InvalidPayload
+    })?;
+    let discussion_id = payload
+        .discussion
+        .and_then(|discussion| discussion.node_id)
+        .ok_or_else(|| {
+            warn!(event, "github discussion webhook missing discussion node_id");
+            WebhookError::InvalidPayload
+        })?;
+
+    let state = state.clone();
+    tokio::spawn(async move {
+        info!(discussion_id = %discussion_id, "github discussion webhook syncing");
+        match tasks::comments_sync::sync_discussion_by_id(&state, &discussion_id).await {
+            Ok(()) => info!(discussion_id = %discussion_id, "discussion sync complete"),
+            Err(err) => warn!(error = %err, discussion_id = %discussion_id, "discussion sync failed"),
         }
     });
 

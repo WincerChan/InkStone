@@ -11,6 +11,7 @@ pub struct AppConfig {
     pub feed_url: String,
     pub poll_interval: Duration,
     pub douban_poll_interval: Duration,
+    pub comments_sync_interval: Duration,
     pub request_timeout: Duration,
     pub max_search_limit: usize,
     pub database_url: Option<String>,
@@ -23,6 +24,13 @@ pub struct AppConfig {
     pub valid_paths_url: String,
     pub kudos_flush_interval: Duration,
     pub github_webhook_secret: Option<String>,
+    pub github_discussion_webhook_secret: Option<String>,
+    pub github_app_id: Option<u64>,
+    pub github_app_installation_id: Option<u64>,
+    pub github_app_private_key: Option<String>,
+    pub github_repo_owner: Option<String>,
+    pub github_repo_name: Option<String>,
+    pub github_discussion_category_id: Option<String>,
     pub cors_allow_origins: Vec<String>,
 }
 
@@ -61,6 +69,7 @@ impl AppConfig {
         let request_timeout_secs = read_u64("INKSTONE_REQUEST_TIMEOUT_SECS", 15)?;
         let max_search_limit = read_usize("INKSTONE_MAX_SEARCH_LIMIT", 50)?;
         let database_url = read_optional_string("INKSTONE_DATABASE_URL")?;
+        let comments_sync_secs = read_u64("INKSTONE_COMMENTS_SYNC_SECS", 432000)?;
         let douban_max_pages = read_usize("INKSTONE_DOUBAN_MAX_PAGES", 1)?;
         let douban_uid = read_string("INKSTONE_DOUBAN_UID", "93562087")?;
         let douban_cookie = read_string("INKSTONE_DOUBAN_COOKIE", "bid=3EHqn8aRvcI")?;
@@ -76,6 +85,16 @@ impl AppConfig {
         )?;
         let kudos_flush_secs = read_u64("INKSTONE_KUDOS_FLUSH_SECS", 60)?;
         let github_webhook_secret = read_optional_string("INKSTONE_GITHUB_WEBHOOK_SECRET")?;
+        let github_discussion_webhook_secret =
+            read_optional_string("INKSTONE_GITHUB_DISCUSSION_WEBHOOK_SECRET")?;
+        let github_app_id = read_optional_u64("INKSTONE_GITHUB_APP_ID")?;
+        let github_app_installation_id =
+            read_optional_u64("INKSTONE_GITHUB_APP_INSTALLATION_ID")?;
+        let github_app_private_key = read_optional_string("INKSTONE_GITHUB_APP_PRIVATE_KEY")?;
+        let github_repo_owner = read_optional_string("INKSTONE_GITHUB_REPO_OWNER")?;
+        let github_repo_name = read_optional_string("INKSTONE_GITHUB_REPO_NAME")?;
+        let github_discussion_category_id =
+            read_optional_string("INKSTONE_GITHUB_DISCUSSION_CATEGORY_ID")?;
         let cors_allow_origins = read_csv("INKSTONE_CORS_ALLOW_ORIGINS")?;
 
         Ok(Self {
@@ -84,6 +103,7 @@ impl AppConfig {
             feed_url,
             poll_interval: Duration::from_secs(poll_interval_secs),
             douban_poll_interval: Duration::from_secs(douban_poll_interval_secs),
+            comments_sync_interval: Duration::from_secs(comments_sync_secs),
             request_timeout: Duration::from_secs(request_timeout_secs),
             max_search_limit,
             database_url,
@@ -96,6 +116,13 @@ impl AppConfig {
             valid_paths_url,
             kudos_flush_interval: Duration::from_secs(kudos_flush_secs),
             github_webhook_secret,
+            github_discussion_webhook_secret,
+            github_app_id,
+            github_app_installation_id,
+            github_app_private_key,
+            github_repo_owner,
+            github_repo_name,
+            github_discussion_category_id,
             cors_allow_origins,
         })
     }
@@ -126,6 +153,17 @@ fn read_u64(key: &'static str, default: u64) -> Result<u64, ConfigError> {
     let raw = read_raw(key)?.unwrap_or_else(|| default.to_string());
     raw.parse()
         .map_err(|_| ConfigError::InvalidNumber(key, raw))
+}
+
+fn read_optional_u64(key: &'static str) -> Result<Option<u64>, ConfigError> {
+    let raw = match read_raw(key)? {
+        Some(value) => value,
+        None => return Ok(None),
+    };
+    let value = raw
+        .parse()
+        .map_err(|_| ConfigError::InvalidNumber(key, raw))?;
+    Ok(Some(value))
 }
 
 fn read_usize(key: &'static str, default: usize) -> Result<usize, ConfigError> {

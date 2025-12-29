@@ -2,7 +2,7 @@
 
 Base URL: `http://127.0.0.1:8080`
 
-API prefix: `/v2` (except `/health` and `/webhook/github`)
+API prefix: `/v2` (except `/health` and `/webhook/github/content`)
 
 
 ## Search
@@ -80,6 +80,64 @@ Notes:
 - `400 Bad Request`: invalid query syntax (e.g. invalid range), empty query, control characters, too many keywords, or `q` exceeds 256 chars
 - `414 URI Too Long`: query string exceeds 512 chars
 - `500 Internal Server Error`: search backend failure
+
+Error body:
+
+```json
+{
+  "error": "message"
+}
+```
+
+## Comments
+
+`GET /v2/comments`
+
+Query parameters:
+
+- `post_id` (required): blog path, e.g. `/posts/hello-world/` or `/life/`
+
+Response:
+
+```json
+{
+  "post_id": "hello-world",
+  "discussion_url": "https://github.com/owner/repo/discussions/12",
+  "total": 2,
+  "comments": [
+    {
+      "id": "DIC_kwDO...",
+      "author_login": "octocat",
+      "author_url": "https://github.com/octocat",
+      "body_html": "<p>First comment</p>",
+      "created_at": "2025-01-01T00:00:00Z",
+      "updated_at": "2025-01-01T00:00:00Z",
+      "replies": [
+        {
+          "id": "DIC_kwDO...",
+          "author_login": "octocat",
+          "author_url": "https://github.com/octocat",
+          "body_html": "<p>Reply</p>",
+          "created_at": "2025-01-01T00:01:00Z",
+          "updated_at": "2025-01-01T00:01:00Z",
+          "replies": []
+        }
+      ]
+    }
+  ]
+}
+```
+
+Notes:
+- `discussion_url` is null when the post has no discussion yet.
+- `post_id` must start with `/` and cannot contain whitespace.
+- Discussion titles are mapped to paths: `hello-world` -> `/posts/hello-world/`. For special pages, set the discussion title to the full path (e.g. `/life/`). Legacy titles like `posts/hello-world` are supported.
+
+Error responses:
+
+- `400 Bad Request`: missing/invalid `post_id`
+- `503 Service Unavailable`: database not configured
+- `500 Internal Server Error`: database error
 
 Error body:
 

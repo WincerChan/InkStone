@@ -4,7 +4,7 @@ use tracing::{debug, warn};
 
 use crate::jobs::JobError;
 use crate::state::AppState;
-use crate::jobs::tasks::{feed_index, valid_paths_refresh};
+use crate::jobs::tasks::{comments_sync, feed_index, valid_paths_refresh};
 use crate::jobs::tasks::feed_index::JobStats;
 
 const FEED_BACKOFF: Duration = Duration::from_secs(60);
@@ -73,6 +73,13 @@ pub async fn run(state: &AppState, rebuild: bool, force: bool) -> Result<JobStat
             failed: 0,
         }
     };
+
+    if force && state.db.is_some() && comments_sync::is_enabled(&state.config) {
+        match comments_sync::run(state, false).await {
+            Ok(stats) => debug!(?stats, "comments sync triggered by content refresh"),
+            Err(err) => warn!(error = %err, "comments sync triggered by content refresh failed"),
+        }
+    }
 
     Ok(stats)
 }

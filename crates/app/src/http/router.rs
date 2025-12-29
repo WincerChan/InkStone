@@ -7,7 +7,7 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
 use crate::http::middleware::{bid_cookie, search_query_limit};
 use crate::state::AppState;
-use crate::http::routes::{analytics, douban, health, kudos, search, webhook};
+use crate::http::routes::{analytics, comments, douban, health, kudos, search, webhook};
 
 pub fn build(state: AppState) -> Router {
     let cors = build_cors(&state);
@@ -19,10 +19,15 @@ pub fn build(state: AppState) -> Router {
                 .layer(middleware::from_fn(search_query_limit::enforce_search_query_length)),
         )
         .route("/v2/douban/marks", get(douban::marks_this_year))
+        .route("/v2/comments", get(comments::get_comments))
         .route("/v2/kudos", get(kudos::get_kudos).put(kudos::put_kudos))
         .route("/v2/pulse/pv", post(analytics::post_pv))
         .route("/v2/pulse/engage", post(analytics::post_engage))
-        .route("/webhook/github", post(webhook::github_webhook))
+        .route("/webhook/github/content", post(webhook::github_webhook))
+        .route(
+            "/webhook/github/discussions",
+            post(webhook::github_discussion_webhook),
+        )
         .layer(middleware::from_fn_with_state(
             state.clone(),
             bid_cookie::ensure_bid_cookie,
