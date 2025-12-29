@@ -25,6 +25,7 @@ pub struct CommentRecord {
     pub comment_id: String,
     pub parent_id: Option<String>,
     pub comment_url: String,
+    pub source: String,
     pub author_login: Option<String>,
     pub author_url: Option<String>,
     pub author_avatar_url: Option<String>,
@@ -77,7 +78,7 @@ pub async fn replace_comments(
     comments: &[CommentRecord],
 ) -> Result<(), CommentsRepoError> {
     let mut tx = pool.begin().await?;
-    delete_comments(&mut tx, discussion_id).await?;
+    delete_comments(&mut tx, discussion_id, "github").await?;
     for comment in comments {
         insert_comment(&mut tx, comment).await?;
     }
@@ -142,6 +143,7 @@ pub async fn list_comments(
                comment_id,
                parent_id,
                comment_url,
+               source,
                author_login,
                author_url,
                author_avatar_url,
@@ -163,6 +165,7 @@ pub async fn list_comments(
             comment_id: row.try_get("comment_id")?,
             parent_id: row.try_get("parent_id")?,
             comment_url: row.try_get("comment_url")?,
+            source: row.try_get("source")?,
             author_login: row.try_get("author_login")?,
             author_url: row.try_get("author_url")?,
             author_avatar_url: row.try_get("author_avatar_url")?,
@@ -177,14 +180,16 @@ pub async fn list_comments(
 async fn delete_comments(
     tx: &mut Transaction<'_, sqlx::Postgres>,
     discussion_id: &str,
+    source: &str,
 ) -> Result<(), CommentsRepoError> {
     sqlx::query(
         r#"
         DELETE FROM comment_items
-        WHERE discussion_id = $1
+        WHERE discussion_id = $1 AND source = $2
         "#,
     )
     .bind(discussion_id)
+    .bind(source)
     .execute(&mut **tx)
     .await?;
     Ok(())
@@ -201,6 +206,7 @@ async fn insert_comment(
             comment_id,
             parent_id,
             comment_url,
+            source,
             author_login,
             author_url,
             author_avatar_url,
@@ -208,13 +214,14 @@ async fn insert_comment(
             created_at,
             updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         "#,
     )
     .bind(&comment.discussion_id)
     .bind(&comment.comment_id)
     .bind(&comment.parent_id)
     .bind(&comment.comment_url)
+    .bind(&comment.source)
     .bind(&comment.author_login)
     .bind(&comment.author_url)
     .bind(&comment.author_avatar_url)

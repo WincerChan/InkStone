@@ -166,6 +166,7 @@ mod tests {
                 parent_id: None,
                 comment_url: "https://github.com/owner/repo/discussions/1#discussioncomment-1"
                     .to_string(),
+                source: "github".to_string(),
                 author_login: None,
                 author_url: None,
                 author_avatar_url: None,
@@ -179,6 +180,7 @@ mod tests {
                 parent_id: Some("c1".to_string()),
                 comment_url: "https://github.com/owner/repo/discussions/1#discussioncomment-2"
                     .to_string(),
+                source: "github".to_string(),
                 author_login: None,
                 author_url: None,
                 author_avatar_url: None,
