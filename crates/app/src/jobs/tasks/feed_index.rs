@@ -1,8 +1,5 @@
-use std::io::Cursor;
-
 use chrono::{DateTime, Utc};
-use quick_xml::events::{BytesRef, BytesStart, Event};
-use quick_xml::Reader;
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tracing::warn;
@@ -31,28 +28,16 @@ enum EntryError {
     InvalidTimestamp(String),
 }
 
-#[derive(Debug, Default)]
-struct AtomEntry {
-    title: Option<String>,
-    link: Option<String>,
-    published: Option<String>,
-    updated: Option<String>,
-    content: Option<String>,
-    categories: Vec<AtomCategory>,
-}
-
-#[derive(Debug)]
-struct AtomCategory {
-    term: Option<String>,
-    label: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum TextTarget {
-    Title,
-    Published,
-    Updated,
-    Content,
+#[derive(Debug, Deserialize)]
+pub(crate) struct SearchIndexEntry {
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub url: String,
+    pub date: String,
+    pub updated: Option<String>,
+    pub category: Option<String>,
+    pub tags: Vec<String>,
+    pub content: String,
 }
 
 pub async fn run(state: &AppState, rebuild: bool) -> Result<JobStats, JobError> {
@@ -63,7 +48,8 @@ pub async fn run(state: &AppState, rebuild: bool) -> Result<JobStats, JobError> 
         .await?
         .error_for_status()?;
     let body = response.bytes().await?;
-    let entries = parse_feed_entries(&body).map_err(|err| JobError::Feed(err.to_string()))?;
+    let entries =
+        parse_search_index_entries(&body).map_err(|err| JobError::Feed(err.to_string()))?;
 
     if rebuild {
         state.search.delete_all()?;
@@ -75,11 +61,12 @@ pub async fn run(state: &AppState, rebuild: bool) -> Result<JobStats, JobError> 
         skipped: 0,
         failed: 0,
     };
-
+    let base_url = base_url_from_feed(&state.config.feed_url);
     let mut to_index = Vec::new();
+
     for entry in entries {
         stats.fetched += 1;
-        match entry_to_document(&entry) {
+        match entry_to_document_from_json(&entry, base_url.as_deref()) {
             Ok(doc) => {
                 if !rebuild {
                     if let Some(existing) = state.search.get_checksum(&doc.id)? {
@@ -93,7 +80,7 @@ pub async fn run(state: &AppState, rebuild: bool) -> Result<JobStats, JobError> 
             }
             Err(err) => {
                 stats.failed += 1;
-                warn!(error = %err, "failed to parse feed entry");
+                warn!(error = %err, "failed to parse search index entry");
             }
         }
     }
@@ -106,292 +93,66 @@ pub async fn run(state: &AppState, rebuild: bool) -> Result<JobStats, JobError> 
     Ok(stats)
 }
 
-fn parse_feed_entries(xml: &[u8]) -> Result<Vec<AtomEntry>, quick_xml::Error> {
-    let mut reader = Reader::from_reader(Cursor::new(xml));
-    reader.config_mut().trim_text(true);
-    let mut buf = Vec::new();
-    let mut entries = Vec::new();
-    let mut current: Option<AtomEntry> = None;
-    let mut text_target: Option<TextTarget> = None;
-    let mut text_buffer = String::new();
-
-    loop {
-        match reader.read_event_into(&mut buf)? {
-            Event::Start(event) => {
-                let name = event.name();
-                if name.as_ref() == b"entry" {
-                    current = Some(AtomEntry::default());
-                } else if let Some(entry) = current.as_mut() {
-                    handle_start_event(
-                        name.as_ref(),
-                        &event,
-                        entry,
-                        &mut text_target,
-                        &mut text_buffer,
-                    )?;
-                }
-            }
-            Event::Empty(event) => {
-                if let Some(entry) = current.as_mut() {
-                    handle_empty_event(event.name().as_ref(), &event, entry)?;
-                }
-            }
-            Event::Text(text) => {
-                if let Some(target) = text_target {
-                    let chunk = match target {
-                        TextTarget::Content => String::from_utf8_lossy(text.as_ref()).into_owned(),
-                        _ => text.decode()?.into_owned(),
-                    };
-                    text_buffer.push_str(&chunk);
-                }
-            }
-            Event::GeneralRef(reference) => {
-                if text_target.is_some() {
-                    append_general_ref(&reference, &mut text_buffer)?;
-                }
-            }
-            Event::CData(text) => {
-                if let Some(target) = text_target {
-                    let chunk = match target {
-                        TextTarget::Content => String::from_utf8_lossy(text.as_ref()).into_owned(),
-                        _ => text.decode()?.into_owned(),
-                    };
-                    text_buffer.push_str(&chunk);
-                }
-            }
-            Event::End(event) => {
-                let name = event.name();
-                if name.as_ref() == b"entry" {
-                    if let Some(entry) = current.take() {
-                        entries.push(entry);
-                    }
-                } else if let Some(target) = text_target {
-                    if target.matches(name.as_ref()) {
-                        if let Some(entry) = current.as_mut() {
-                            assign_text(entry, target, &text_buffer);
-                        }
-                        text_buffer.clear();
-                        text_target = None;
-                    }
-                }
-            }
-            Event::Eof => break,
-            _ => {}
-        }
-        buf.clear();
-    }
-
-    Ok(entries)
+pub(crate) fn parse_search_index_entries(
+    json: &[u8],
+) -> Result<Vec<SearchIndexEntry>, serde_json::Error> {
+    serde_json::from_slice(json)
 }
 
-fn handle_start_event(
-    name: &[u8],
-    event: &BytesStart<'_>,
-    entry: &mut AtomEntry,
-    text_target: &mut Option<TextTarget>,
-    text_buffer: &mut String,
-) -> Result<(), quick_xml::Error> {
-    if name == b"link" {
-        parse_link_attrs(event, entry)?;
-    } else if name == b"category" {
-        parse_category_attrs(event, entry)?;
+pub(crate) fn base_url_from_feed(feed_url: &str) -> Option<String> {
+    let (scheme, rest) = feed_url.split_once("://")?;
+    let host = rest.split('/').next()?;
+    if host.is_empty() {
+        return None;
     }
-
-    if text_target.is_none() {
-        if let Some(target) = TextTarget::from_name(name) {
-            *text_target = Some(target);
-            text_buffer.clear();
-        }
-    }
-
-    Ok(())
+    Some(format!("{scheme}://{host}"))
 }
 
-fn handle_empty_event(
-    name: &[u8],
-    event: &BytesStart<'_>,
-    entry: &mut AtomEntry,
-) -> Result<(), quick_xml::Error> {
-    if name == b"link" {
-        parse_link_attrs(event, entry)?;
-    } else if name == b"category" {
-        parse_category_attrs(event, entry)?;
+fn entry_to_document_from_json(
+    entry: &SearchIndexEntry,
+    base_url: Option<&str>,
+) -> Result<SearchDocument, EntryError> {
+    let title = entry.title.trim();
+    if title.is_empty() {
+        return Err(EntryError::MissingTitle);
     }
-    Ok(())
-}
-
-fn parse_link_attrs(event: &BytesStart<'_>, entry: &mut AtomEntry) -> Result<(), quick_xml::Error> {
-    let mut href = None;
-    let mut rel = None;
-    for attr in event.attributes() {
-        let attr = attr?;
-        match attr.key.as_ref() {
-            b"href" => href = Some(attr.unescape_value()?.to_string()),
-            b"rel" => rel = Some(attr.unescape_value()?.to_string()),
-            _ => {}
-        }
+    let url_raw = entry.url.trim();
+    if url_raw.is_empty() {
+        return Err(EntryError::MissingLink);
     }
+    let url = resolve_entry_url(url_raw, base_url);
 
-    if let Some(href) = href {
-        let rel_alt = rel.as_deref() == Some("alternate");
-        if entry.link.is_none() || rel_alt {
-            entry.link = Some(href);
-        }
-    }
-    Ok(())
-}
-
-fn parse_category_attrs(
-    event: &BytesStart<'_>,
-    entry: &mut AtomEntry,
-) -> Result<(), quick_xml::Error> {
-    let mut term = None;
-    let mut label = None;
-    for attr in event.attributes() {
-        let attr = attr?;
-        match attr.key.as_ref() {
-            b"term" => term = Some(attr.unescape_value()?.to_string()),
-            b"label" => label = Some(attr.unescape_value()?.to_string()),
-            _ => {}
-        }
-    }
-
-    let term = term.map(|value| value.trim().to_string()).filter(|value| !value.is_empty());
-    let label = label.map(|value| value.trim().to_string()).filter(|value| !value.is_empty());
-    if term.is_some() || label.is_some() {
-        entry.categories.push(AtomCategory { term, label });
-    }
-    Ok(())
-}
-
-fn assign_text(entry: &mut AtomEntry, target: TextTarget, value: &str) {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return;
-    }
-    match target {
-        TextTarget::Title => entry.title = Some(trimmed.to_string()),
-        TextTarget::Published => entry.published = Some(trimmed.to_string()),
-        TextTarget::Updated => entry.updated = Some(trimmed.to_string()),
-        TextTarget::Content => entry.content = Some(trimmed.to_string()),
-    }
-}
-
-fn append_general_ref(
-    reference: &BytesRef<'_>,
-    text_buffer: &mut String,
-) -> Result<(), quick_xml::Error> {
-    if let Some(ch) = reference.resolve_char_ref()? {
-        text_buffer.push(ch);
-        return Ok(());
-    }
-
-    let name = reference.decode()?;
-    match name.as_ref() {
-        "lt" => text_buffer.push('<'),
-        "gt" => text_buffer.push('>'),
-        "amp" => text_buffer.push('&'),
-        "quot" => text_buffer.push('"'),
-        "apos" => text_buffer.push('\''),
-        "nbsp" => text_buffer.push(' '),
-        _ => {
-            text_buffer.push('&');
-            text_buffer.push_str(name.as_ref());
-            text_buffer.push(';');
-        }
-    }
-    Ok(())
-}
-
-impl TextTarget {
-    fn from_name(name: &[u8]) -> Option<Self> {
-        match name {
-            b"title" => Some(TextTarget::Title),
-            b"published" => Some(TextTarget::Published),
-            b"updated" => Some(TextTarget::Updated),
-            b"content" => Some(TextTarget::Content),
-            _ => None,
-        }
-    }
-
-    fn matches(self, name: &[u8]) -> bool {
-        match self {
-            TextTarget::Title => name == b"title",
-            TextTarget::Published => name == b"published",
-            TextTarget::Updated => name == b"updated",
-            TextTarget::Content => name == b"content",
-        }
-    }
-}
-
-fn entry_to_document(entry: &AtomEntry) -> Result<SearchDocument, EntryError> {
-    let title = entry
-        .title
-        .as_ref()
-        .map(|text| text.trim().to_string())
-        .filter(|text| !text.is_empty())
-        .ok_or(EntryError::MissingTitle)?;
-
-    let url = entry
-        .link
-        .as_ref()
-        .map(|text| text.trim().to_string())
-        .filter(|text| !text.is_empty())
-        .ok_or(EntryError::MissingLink)?;
-
-    let published_raw = entry
-        .published
-        .as_deref()
-        .or(entry.updated.as_deref())
-        .ok_or(EntryError::MissingTimestamps)?;
-    let published_at = parse_datetime(published_raw)?;
+    let published_at = parse_datetime(entry.date.trim())?;
     let updated_at = entry
         .updated
         .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
         .map(parse_datetime)
         .transpose()?
         .unwrap_or(published_at);
 
-    let content_raw = entry.content.as_deref().unwrap_or("");
-    let content = normalize_whitespace(&strip_html_tags(content_raw));
+    let content_raw = sanitize_markdown(&entry.content);
+    let content = normalize_whitespace(&content_raw);
 
-    let (category, category_term) = entry.categories.first().map_or((None, None), |category| {
-        let label = category.label.as_deref().unwrap_or("").trim();
-        if !label.is_empty() {
-            return (Some(label.to_string()), category.term.as_deref());
-        }
-        let term = category.term.as_deref().unwrap_or("").trim();
-        if term.is_empty() {
-            (None, None)
-        } else {
-            (Some(term.to_string()), Some(term))
-        }
-    });
-    let tags: Vec<String> = entry
-        .categories
-        .iter()
-        .filter_map(|category| category.term.as_ref())
-        .map(|value| value.trim().to_string())
+    let category = entry
+        .category
+        .as_deref()
+        .map(str::trim)
         .filter(|value| !value.is_empty())
-        .filter(|value| {
-            if let Some(term) = category_term {
-                if value == term {
-                    return false;
-                }
-            }
-            if let Some(category) = category.as_deref() {
-                if value == category {
-                    return false;
-                }
-            }
-            true
-        })
-        .collect();
+        .map(|value| value.to_string());
+    let tags = entry
+        .tags
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .collect::<Vec<_>>();
 
     let doc_id = url.clone();
     let checksum = compute_checksum(
         &doc_id,
-        &title,
+        title,
         &content,
         &url,
         &tags,
@@ -402,7 +163,7 @@ fn entry_to_document(entry: &AtomEntry) -> Result<SearchDocument, EntryError> {
 
     Ok(SearchDocument {
         id: doc_id,
-        title,
+        title: title.to_string(),
         content,
         url,
         tags,
@@ -411,6 +172,25 @@ fn entry_to_document(entry: &AtomEntry) -> Result<SearchDocument, EntryError> {
         updated_at,
         checksum,
     })
+}
+
+fn resolve_entry_url(url: &str, base_url: Option<&str>) -> String {
+    if url.starts_with("http://") || url.starts_with("https://") {
+        return url.to_string();
+    }
+    let Some(base) = base_url else {
+        return url.to_string();
+    };
+    if url.starts_with('/') {
+        return format!("{base}{url}");
+    }
+    format!("{base}/{url}")
+}
+
+fn sanitize_markdown(value: &str) -> String {
+    value
+        .replace("<!--more-->", "")
+        .replace("<!-- more -->", "")
 }
 
 fn parse_datetime(value: &str) -> Result<DateTime<Utc>, EntryError> {
@@ -454,15 +234,6 @@ fn compute_checksum(
     hex::encode(hasher.finalize())
 }
 
-fn strip_html_tags(input: &str) -> String {
-    let mut text = input.to_string();
-    for _ in 0..2 {
-        let decoded = decode_html_entities(&text);
-        text = remove_html_tags(&decoded);
-    }
-    decode_html_entities(&text)
-}
-
 fn normalize_whitespace(input: &str) -> String {
     let mut parts = input.split_whitespace();
     let Some(first) = parts.next() else {
@@ -477,216 +248,55 @@ fn normalize_whitespace(input: &str) -> String {
     output
 }
 
-fn remove_html_tags(input: &str) -> String {
-    let mut output = String::with_capacity(input.len());
-    let mut in_tag = false;
-    for ch in input.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => {
-                in_tag = false;
-                output.push(' ');
-            }
-            _ if !in_tag => output.push(ch),
-            _ => {}
-        }
-    }
-    output
-}
-
-fn decode_html_entities(input: &str) -> String {
-    let mut output = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch != '&' {
-            output.push(ch);
-            continue;
-        }
-
-        let mut entity = String::new();
-        let mut valid = false;
-        while let Some(&next) = chars.peek() {
-            if next == ';' {
-                chars.next();
-                valid = true;
-                break;
-            }
-            if next.is_whitespace() || entity.len() > 32 {
-                break;
-            }
-            chars.next();
-            entity.push(next);
-        }
-
-        if !valid || entity.is_empty() {
-            output.push('&');
-            if !entity.is_empty() {
-                output.push_str(&entity);
-            }
-            continue;
-        }
-
-        match entity.as_str() {
-            "amp" => output.push('&'),
-            "lt" => output.push('<'),
-            "gt" => output.push('>'),
-            "quot" => output.push('"'),
-            "apos" => output.push('\''),
-            "nbsp" => output.push(' '),
-            _ => {
-                if let Some(decoded) = decode_numeric_entity(&entity) {
-                    output.push(decoded);
-                } else {
-                    output.push('&');
-                    output.push_str(&entity);
-                    output.push(';');
-                }
-            }
-        }
-    }
-    output
-}
-
-fn decode_numeric_entity(entity: &str) -> Option<char> {
-    let trimmed = entity.strip_prefix('#')?;
-    if let Some(hex) = trimmed.strip_prefix(['x', 'X']) {
-        u32::from_str_radix(hex, 16).ok().and_then(char::from_u32)
-    } else {
-        trimmed.parse::<u32>().ok().and_then(char::from_u32)
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{entry_to_document, parse_feed_entries, AtomCategory, AtomEntry};
+    use super::{
+        entry_to_document_from_json, parse_search_index_entries, SearchIndexEntry,
+    };
 
-    fn base_entry() -> AtomEntry {
-        AtomEntry {
-            title: Some("Title".to_string()),
-            link: Some("https://example.com/post".to_string()),
-            published: Some("2025-01-01T00:00:00Z".to_string()),
+    fn base_entry() -> SearchIndexEntry {
+        SearchIndexEntry {
+            title: "Title".to_string(),
+            subtitle: None,
+            url: "/posts/hello/".to_string(),
+            date: "2025-01-01T00:00:00Z".to_string(),
             updated: None,
-            content: None,
-            categories: Vec::new(),
+            category: Some("分享境".to_string()),
+            tags: vec!["Rust".to_string()],
+            content: "Hi".to_string(),
         }
     }
 
     #[test]
-    fn category_term_is_not_in_tags() {
+    fn content_keeps_html_tags_in_json() {
         let mut entry = base_entry();
-        entry.categories = vec![
-            AtomCategory {
-                term: Some("category".to_string()),
-                label: None,
-            },
-            AtomCategory {
-                term: Some("tag1".to_string()),
-                label: None,
-            },
-        ];
+        entry.content = "<Suspense><div>Hi</div></Suspense>".to_string();
 
-        let doc = entry_to_document(&entry).unwrap();
-        assert_eq!(doc.category, Some("category".to_string()));
-        assert_eq!(doc.tags, vec!["tag1".to_string()]);
+        let doc = entry_to_document_from_json(&entry, Some("https://example.com")).unwrap();
+        assert!(doc.content.contains("<Suspense>"));
     }
 
     #[test]
-    fn category_label_excludes_first_term() {
-        let mut entry = base_entry();
-        entry.categories = vec![
-            AtomCategory {
-                term: Some("category-term".to_string()),
-                label: Some("Category".to_string()),
-            },
-            AtomCategory {
-                term: Some("tag1".to_string()),
-                label: None,
-            },
-        ];
-
-        let doc = entry_to_document(&entry).unwrap();
-        assert_eq!(doc.category, Some("Category".to_string()));
-        assert_eq!(doc.tags, vec!["tag1".to_string()]);
-    }
-
-    #[test]
-    fn content_empty_when_missing() {
-        let mut entry = base_entry();
-        entry.content = Some("<p></p>".to_string());
-
-        let doc = entry_to_document(&entry).unwrap();
-        assert!(doc.content.is_empty());
-    }
-
-    #[test]
-    fn id_uses_url() {
-        let entry = base_entry();
-        let doc = entry_to_document(&entry).unwrap();
-        assert_eq!(doc.id, "https://example.com/post");
-    }
-
-    #[test]
-    fn content_strips_html_and_decodes_entities() {
-        let mut entry = base_entry();
-        entry.content = Some("&lt;p&gt;Tom &amp; Jerry &quot;show&quot;&lt;/p&gt;".to_string());
-
-        let doc = entry_to_document(&entry).unwrap();
-        assert_eq!(doc.content, "Tom & Jerry \"show\"");
-    }
-
-    #[test]
-    fn content_strips_double_encoded_html() {
-        let mut entry = base_entry();
-        entry.content = Some(
-            "&amp;lt;del&amp;gt;我爱你&amp;lt;/del&amp;gt;".to_string(),
-        );
-
-        let doc = entry_to_document(&entry).unwrap();
-        assert_eq!(doc.content, "我爱你");
-    }
-
-    #[test]
-    fn content_from_atom_is_decoded_and_stripped() {
-        let xml = r#"
-<feed xmlns="http://www.w3.org/2005/Atom">
-  <entry>
-    <title>Example</title>
-    <link rel="alternate" type="text/html" href="https://example.com/post" />
-    <id>urn:uuid:1234</id>
-    <published>2025-01-01T00:00:00Z</published>
-    <updated>2025-01-02T00:00:00Z</updated>
-    <content type="html">&lt;p&gt;&lt;img src="https://img13.360buyimg.com/ddimg/jfs/t1/256238/30/29757/30939/67c95492F0a2613af/29d8241f4de5174e.jpg" alt="cover" /&gt;&lt;/p&gt;&lt;p&gt;好久没在&lt;a href="/category/%E6%96%87%E5%AD%97%E9%98%81/"&gt;文字阁&lt;/a&gt;分类里发文了&lt;del&gt;这当然不是因为我好久没读书了&lt;/del&gt;。&lt;/p&gt;</content>
-  </entry>
-</feed>
+    fn json_entry_builds_document() {
+        let json = r#"
+[
+  {
+    "title": "Hello",
+    "subtitle": "Sub",
+    "url": "/posts/hello/",
+    "date": "2025-01-01T00:00:00Z",
+    "updated": "2025-01-02T00:00:00Z",
+    "category": "分享境",
+    "tags": ["Rust"],
+    "content": "Hi<!--more-->there"
+  }
+]
 "#;
-        let entries = parse_feed_entries(xml.as_bytes()).unwrap();
-        let raw = entries[0].content.as_deref().unwrap_or("");
-        assert!(
-            raw.contains('<') || raw.contains("&lt;"),
-            "raw content missing tag markers: {}",
-            raw
-        );
-        let doc = entry_to_document(&entries[0]).unwrap();
-        let normalized = normalize_space(&doc.content);
-        assert!(normalized.contains("好久没在"));
-        assert!(normalized.contains("文字阁"));
-        assert!(normalized.contains("这当然不是因为我好久没读书了"));
-        assert!(
-            !doc.content.contains("pimg"),
-            "content still has tag text: {}",
-            doc.content
-        );
-        assert!(!doc.content.contains("href"));
-        assert!(!doc.content.contains("del"));
-        assert!(!doc.content.contains('<'));
-        assert!(!doc.content.contains('>'));
-    }
-
-    fn normalize_space(input: &str) -> String {
-        input
-            .split_whitespace()
-            .filter(|part| !part.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ")
+        let entries = parse_search_index_entries(json.as_bytes()).unwrap();
+        let doc =
+            entry_to_document_from_json(&entries[0], Some("https://example.com")).unwrap();
+        assert_eq!(doc.url, "https://example.com/posts/hello/");
+        assert!(doc.content.contains("Hi"));
+        assert!(!doc.content.contains("<!--more-->"));
     }
 }

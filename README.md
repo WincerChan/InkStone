@@ -58,7 +58,7 @@ Content refresh failures enter a 60-second per-task backoff without blocking oth
 
 - `INKSTONE_HTTP_ADDR` (default: `127.0.0.1:8080`)
 - `INKSTONE_INDEX_DIR` (default: `./data/index`)
-- `INKSTONE_FEED_URL` (default: `https://velite-refactor.blog-8fo.pages.dev/atom.xml`)
+- `INKSTONE_FEED_URL` (default: `https://refactor-styles.blog-8fo.pages.dev/search-index.json`, Atom XML is still supported)
 - `INKSTONE_POLL_INTERVAL_SECS` (default: `300`)
 - `INKSTONE_DOUBAN_POLL_INTERVAL_SECS` (default: `INKSTONE_POLL_INTERVAL_SECS`)
 - `INKSTONE_REQUEST_TIMEOUT_SECS` (default: `15`)

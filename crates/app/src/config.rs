@@ -55,7 +55,7 @@ impl AppConfig {
         let index_dir = PathBuf::from(read_string("INKSTONE_INDEX_DIR", "./data/index")?);
         let feed_url = read_string(
             "INKSTONE_FEED_URL",
-            "https://velite-refactor.blog-8fo.pages.dev/atom.xml",
+            "https://refactor-styles.blog-8fo.pages.dev/search-index.json",
         )?;
         if feed_url.trim().is_empty() {
             return Err(ConfigError::InvalidValue(
