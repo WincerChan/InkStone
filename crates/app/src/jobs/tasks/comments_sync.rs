@@ -5,9 +5,7 @@ use tracing::{info, warn};
 
 use crate::config::AppConfig;
 use crate::jobs::JobError;
-use crate::jobs::tasks::feed_index::{
-    SearchIndexEntry, base_url_from_feed, parse_search_index_entries,
-};
+use crate::jobs::tasks::feed_index::{SearchIndexEntry, parse_search_index_entries};
 use crate::state::AppState;
 use inkstone_core::types::slug::Slug;
 use inkstone_infra::db::{
@@ -28,7 +26,6 @@ pub struct CommentsSyncStats {
 struct PostRef {
     post_id: String,
     slug: String,
-    url: String,
     title: String,
     summary: Option<String>,
 }
@@ -330,24 +327,21 @@ async fn fetch_posts(state: &AppState) -> Result<Vec<PostRef>, JobError> {
     let body = response.bytes().await?;
     let entries =
         parse_search_index_entries(&body).map_err(|err| JobError::Comments(err.to_string()))?;
-    let base_url = base_url_from_feed(&state.config.feed_url);
     let mut posts = Vec::new();
     for entry in entries {
-        if let Some(post) = post_from_index_entry(&entry, base_url.as_deref()) {
+        if let Some(post) = post_from_index_entry(&entry) {
             posts.push(post);
         }
     }
     Ok(add_special_pages(posts))
 }
 
-fn post_from_index_entry(entry: &SearchIndexEntry, base_url: Option<&str>) -> Option<PostRef> {
+fn post_from_index_entry(entry: &SearchIndexEntry) -> Option<PostRef> {
     let path = path_from_url(&entry.url)?;
     let slug = slug_from_path(&path)?;
-    let url = resolve_entry_url(&entry.url, base_url);
     Some(PostRef {
         post_id: path,
         slug,
-        url,
         title: entry.title.trim().to_string(),
         summary: summary_from_entry(entry),
     })
@@ -373,7 +367,6 @@ fn add_special_pages(mut posts: Vec<PostRef>) -> Vec<PostRef> {
             posts.push(PostRef {
                 post_id: path.to_string(),
                 slug,
-                url: format!("{}{}", BLOG_BASE_URL, path),
                 title: path.to_string(),
                 summary: None,
             });
@@ -462,19 +455,6 @@ fn split_at_more_marker(content: &str) -> (&str, bool) {
     } else {
         (content, false)
     }
-}
-
-fn resolve_entry_url(url: &str, base_url: Option<&str>) -> String {
-    if url.starts_with("http://") || url.starts_with("https://") {
-        return url.to_string();
-    }
-    let Some(base) = base_url else {
-        return url.to_string();
-    };
-    if url.starts_with('/') {
-        return format!("{base}{url}");
-    }
-    format!("{base}/{url}")
 }
 
 const BLOG_BASE_URL: &str = "https://blog.itswincer.com";
@@ -642,7 +622,6 @@ mod tests {
         let post = super::PostRef {
             post_id: "/posts/hello-world/".to_string(),
             slug: "hello-world".to_string(),
-            url: "https://example.com/posts/hello-world/".to_string(),
             title: "hello-world".to_string(),
             summary: None,
         };
@@ -660,7 +639,6 @@ mod tests {
         let posts = vec![super::PostRef {
             post_id: "/life/".to_string(),
             slug: "life".to_string(),
-            url: "https://example.com/life/".to_string(),
             title: "/life/".to_string(),
             summary: None,
         }];
@@ -705,7 +683,6 @@ mod tests {
         let post = super::PostRef {
             post_id: "/posts/hello-world/".to_string(),
             slug: "hello-world".to_string(),
-            url: "https://example.com/posts/hello-world/".to_string(),
             title: "Hello World".to_string(),
             summary: Some("Hello <b>World</b>".to_string()),
         };
