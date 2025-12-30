@@ -42,6 +42,9 @@ pub async fn ensure_bid_cookie(
     mut request: Request<Body>,
     next: Next,
 ) -> Result<Response, BidCookieError> {
+    if !should_handle_cookie(&request) {
+        return Ok(next.run(request).await);
+    }
     let cookie_secret = state
         .config
         .cookie_secret
@@ -87,6 +90,11 @@ pub async fn ensure_bid_cookie(
         }
     }
     Ok(response)
+}
+
+fn should_handle_cookie(request: &Request<Body>) -> bool {
+    let path = request.uri().path();
+    path == "/v2/kudos" || path.starts_with("/v2/pulse/")
 }
 
 fn requires_cookie(request: &Request<Body>) -> bool {
@@ -186,8 +194,8 @@ mod tests {
     use axum::http::Request;
 
     use super::{
-        build_stats_id, decode_token_bytes, parse_cookie_value, requires_cookie, sign_token,
-        verify_cookie,
+        build_stats_id, decode_token_bytes, parse_cookie_value, requires_cookie,
+        should_handle_cookie, sign_token, verify_cookie,
     };
 
     #[test]
@@ -227,5 +235,27 @@ mod tests {
             .body(axum::body::Body::empty())
             .expect("request");
         assert!(requires_cookie(&req));
+    }
+
+    #[test]
+    fn should_handle_cookie_for_kudos_and_pulse() {
+        let req = Request::builder()
+            .method("GET")
+            .uri("/v2/kudos")
+            .body(axum::body::Body::empty())
+            .expect("request");
+        assert!(should_handle_cookie(&req));
+        let req = Request::builder()
+            .method("POST")
+            .uri("/v2/pulse/pv")
+            .body(axum::body::Body::empty())
+            .expect("request");
+        assert!(should_handle_cookie(&req));
+        let req = Request::builder()
+            .method("GET")
+            .uri("/v2/search")
+            .body(axum::body::Body::empty())
+            .expect("request");
+        assert!(!should_handle_cookie(&req));
     }
 }
