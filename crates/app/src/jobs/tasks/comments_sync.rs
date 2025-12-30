@@ -92,6 +92,9 @@ pub async fn run(state: &AppState, rebuild: bool) -> Result<CommentsSyncStats, J
         }
     };
     for discussion in discussions {
+        if !is_github_discussion_id(&discussion.discussion_id) {
+            continue;
+        }
         if !rebuild && !should_sync_discussion(&latest_updates, &discussion) {
             continue;
         }
@@ -154,6 +157,7 @@ async fn fetch_discussion_updates(
     let mut updates = HashMap::new();
     let ids: Vec<String> = discussions
         .iter()
+        .filter(|discussion| is_github_discussion_id(&discussion.discussion_id))
         .map(|discussion| discussion.discussion_id.clone())
         .collect();
     for chunk in ids.chunks(PRECHECK_BATCH_SIZE) {
@@ -164,6 +168,10 @@ async fn fetch_discussion_updates(
         updates.extend(chunk_updates);
     }
     Ok(updates)
+}
+
+fn is_github_discussion_id(value: &str) -> bool {
+    value.starts_with("D_")
 }
 
 fn should_sync_discussion(
@@ -339,8 +347,9 @@ async fn fetch_posts(state: &AppState) -> Result<Vec<PostRef>, JobError> {
 fn post_from_index_entry(entry: &SearchIndexEntry) -> Option<PostRef> {
     let path = path_from_url(&entry.url)?;
     let slug = slug_from_path(&path)?;
+    let post_id = format!("/posts/{slug}/");
     Some(PostRef {
-        post_id: path,
+        post_id,
         slug,
         title: entry.title.trim().to_string(),
         summary: summary_from_entry(entry),
@@ -419,11 +428,12 @@ fn slug_from_path(path: &str) -> Option<String> {
         return None;
     }
     let rest = &path[marker.len()..];
-    let slug = rest.split('/').next()?.trim();
-    if slug.is_empty() {
+    let slug_raw = rest.split('/').next()?.trim();
+    if slug_raw.is_empty() {
         return None;
     }
-    Slug::try_from(slug)
+    let slug = slug_raw.to_ascii_lowercase();
+    Slug::try_from(slug.as_str())
         .ok()
         .map(|value| value.as_str().to_string())
 }
@@ -595,7 +605,8 @@ mod tests {
     use chrono::{TimeZone, Utc};
 
     use super::{
-        SearchIndexEntry, path_from_url, should_sync_discussion, slug_from_path, title_candidates,
+        SearchIndexEntry, is_github_discussion_id, path_from_url, should_sync_discussion,
+        slug_from_path, title_candidates,
     };
     use inkstone_infra::db::DiscussionRecord;
 
@@ -608,6 +619,12 @@ mod tests {
     #[test]
     fn slug_from_path_extracts_posts() {
         let path = "/posts/hello-world/";
+        assert_eq!(slug_from_path(path), Some("hello-world".to_string()));
+    }
+
+    #[test]
+    fn slug_from_path_normalizes_case() {
+        let path = "/posts/Hello-World/";
         assert_eq!(slug_from_path(path), Some("hello-world".to_string()));
     }
 
@@ -676,6 +693,13 @@ mod tests {
         assert!(should_sync_discussion(&updates, &discussion));
         updates.clear();
         assert!(should_sync_discussion(&updates, &discussion));
+    }
+
+    #[test]
+    fn is_github_discussion_id_detects_prefix() {
+        assert!(is_github_discussion_id("D_123"));
+        assert!(!is_github_discussion_id("/posts/hello/"));
+        assert!(!is_github_discussion_id("legacy:posts/hello/"));
     }
 
     #[test]
