@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use jsonwebtoken::{encode, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 use serde_json::from_str;
+use std::collections::HashMap;
 use thiserror::Error;
 
 const GRAPHQL_ENDPOINT: &str = "https://api.github.com/graphql";
@@ -145,6 +146,38 @@ impl GithubAppClient {
         let data: DiscussionNodeResponse = self.graphql(query, NodeVars { id: discussion_id }).await?;
         let node = data.node.ok_or(GithubError::MissingData("discussion node"))?;
         node.into_info()
+    }
+
+    pub async fn fetch_discussion_updates(
+        &self,
+        ids: &[String],
+    ) -> Result<HashMap<String, DateTime<Utc>>, GithubError> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let query = r#"
+            query($ids: [ID!]!) {
+              nodes(ids: $ids) {
+                ... on Discussion {
+                  id
+                  updatedAt
+                }
+              }
+            }
+        "#;
+        let vars = NodesVars {
+            ids: ids.to_vec(),
+        };
+        let data: NodesResponse = self.graphql(query, vars).await?;
+        let mut updates = HashMap::new();
+        for node in data.nodes {
+            let Some(node) = node else {
+                continue;
+            };
+            let updated_at = parse_datetime(&node.updated_at)?;
+            updates.insert(node.id, updated_at);
+        }
+        Ok(updates)
     }
 
     pub async fn create_discussion(
@@ -334,9 +367,19 @@ struct NodeVars<'a> {
     id: &'a str,
 }
 
+#[derive(Debug, Serialize)]
+struct NodesVars {
+    ids: Vec<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct DiscussionNodeResponse {
     node: Option<DiscussionNodeWithComments>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NodesResponse {
+    nodes: Vec<Option<DiscussionMetaNode>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -354,6 +397,13 @@ struct DiscussionNode {
     url: String,
     #[serde(rename = "createdAt")]
     created_at: String,
+    #[serde(rename = "updatedAt")]
+    updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DiscussionMetaNode {
+    id: String,
     #[serde(rename = "updatedAt")]
     updated_at: String,
 }

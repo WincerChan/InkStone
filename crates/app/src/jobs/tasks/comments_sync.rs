@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+
+use chrono::{DateTime, Utc};
 use tracing::{info, warn};
 
 use crate::config::AppConfig;
@@ -80,7 +83,21 @@ pub async fn run(state: &AppState, rebuild: bool) -> Result<CommentsSyncStats, J
     }
 
     let discussions = list_discussions(pool).await?;
+    let latest_updates = if rebuild {
+        HashMap::new()
+    } else {
+        match fetch_discussion_updates(&client, &discussions).await {
+            Ok(updates) => updates,
+            Err(err) => {
+                warn!(error = %err, "discussion precheck failed; syncing all");
+                HashMap::new()
+            }
+        }
+    };
     for discussion in discussions {
+        if !rebuild && !should_sync_discussion(&latest_updates, &discussion) {
+            continue;
+        }
         if !rebuild {
             info!(post_id = %discussion.post_id, "syncing discussion comments");
         }
@@ -129,6 +146,37 @@ async fn sync_discussion_with_client(
     };
     store_discussion(pool, &post_id, &info).await?;
     Ok(())
+}
+
+const PRECHECK_BATCH_SIZE: usize = 50;
+
+async fn fetch_discussion_updates(
+    client: &GithubAppClient,
+    discussions: &[DiscussionRecord],
+) -> Result<HashMap<String, DateTime<Utc>>, JobError> {
+    let mut updates = HashMap::new();
+    let ids: Vec<String> = discussions
+        .iter()
+        .map(|discussion| discussion.discussion_id.clone())
+        .collect();
+    for chunk in ids.chunks(PRECHECK_BATCH_SIZE) {
+        let chunk_updates = client
+            .fetch_discussion_updates(chunk)
+            .await
+            .map_err(|err| JobError::Comments(err.to_string()))?;
+        updates.extend(chunk_updates);
+    }
+    Ok(updates)
+}
+
+fn should_sync_discussion(
+    latest_updates: &HashMap<String, DateTime<Utc>>,
+    discussion: &DiscussionRecord,
+) -> bool {
+    match latest_updates.get(&discussion.discussion_id) {
+        Some(updated_at) => *updated_at != discussion.updated_at,
+        None => true,
+    }
 }
 
 async fn post_id_from_title(state: &AppState, title: &str) -> Result<String, JobError> {
@@ -562,7 +610,14 @@ impl CommentsConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{SearchIndexEntry, path_from_url, slug_from_path, title_candidates};
+    use std::collections::HashMap;
+
+    use chrono::{TimeZone, Utc};
+
+    use super::{
+        SearchIndexEntry, path_from_url, should_sync_discussion, slug_from_path, title_candidates,
+    };
+    use inkstone_infra::db::DiscussionRecord;
 
     #[test]
     fn path_from_url_extracts_path() {
@@ -617,6 +672,32 @@ mod tests {
         assert_eq!(life_count, 1);
         assert!(updated.iter().any(|post| post.post_id == "/about/"));
         assert!(updated.iter().any(|post| post.post_id == "/friends-en/"));
+    }
+
+    #[test]
+    fn should_sync_discussion_compares_updated_at() {
+        let discussion = DiscussionRecord {
+            post_id: "/posts/hello/".to_string(),
+            discussion_id: "D1".to_string(),
+            number: 1,
+            title: "/posts/hello/".to_string(),
+            url: "https://github.com/example/1".to_string(),
+            created_at: Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap(),
+            updated_at: Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap(),
+        };
+        let mut updates = HashMap::new();
+        updates.insert(
+            "D1".to_string(),
+            Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap(),
+        );
+        assert!(!should_sync_discussion(&updates, &discussion));
+        updates.insert(
+            "D1".to_string(),
+            Utc.with_ymd_and_hms(2024, 1, 3, 0, 0, 0).unwrap(),
+        );
+        assert!(should_sync_discussion(&updates, &discussion));
+        updates.clear();
+        assert!(should_sync_discussion(&updates, &discussion));
     }
 
     #[test]
