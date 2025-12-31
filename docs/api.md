@@ -4,6 +4,10 @@ Base URL: `http://127.0.0.1:8080`
 
 API prefix: `/v2` (except `/health` and `/webhook/github/content`)
 
+## CORS
+
+When `INKSTONE_CORS_ALLOW_ORIGINS` is empty, the API does not emit CORS headers (recommended if your gateway handles it).
+Use `*` to allow any origin (credentials disabled). Otherwise provide a comma-separated allowlist.
 
 ## Search
 
