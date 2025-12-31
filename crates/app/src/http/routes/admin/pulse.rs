@@ -1,0 +1,297 @@
+use axum::extract::{Query, State};
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use axum::Json;
+use chrono::{Duration, NaiveDate, Utc};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+use crate::state::AppState;
+use inkstone_infra::db::{
+    fetch_country_counts, fetch_daily, fetch_device_counts, fetch_ref_host_counts,
+    fetch_source_counts, fetch_totals, fetch_top_paths, fetch_ua_counts, list_sites,
+    AnalyticsRepoError, PulseDailyStat, PulseDimCount, PulseSiteOverview, PulseTopPath, PulseTotals,
+};
+
+const DEFAULT_RANGE_DAYS: i64 = 30;
+const DEFAULT_TOP_LIMIT: i64 = 20;
+const MAX_TOP_LIMIT: i64 = 200;
+const MAX_SITE_LEN: usize = 255;
+
+#[derive(Debug, Deserialize)]
+pub struct PulseSiteQuery {
+    pub site: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Error)]
+pub enum PulseAdminError {
+    #[error("site is required")]
+    MissingSite,
+    #[error("site is invalid")]
+    InvalidSite,
+    #[error("invalid date")]
+    InvalidDate,
+    #[error("invalid date range")]
+    InvalidDateRange,
+    #[error("db not configured")]
+    DbUnavailable,
+    #[error("db error: {0}")]
+    Db(#[from] AnalyticsRepoError),
+}
+
+#[derive(Debug, Serialize)]
+struct ErrorBody {
+    error: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PulseSitesResponse {
+    total: usize,
+    items: Vec<PulseSiteEntry>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PulseSiteEntry {
+    site: String,
+    pv: i64,
+    uv: i64,
+    last_seen_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PulseSiteStatsResponse {
+    site: String,
+    range: PulseRange,
+    summary: PulseSummary,
+    daily: Vec<PulseDailyEntry>,
+    top_paths: Vec<PulseTopPathEntry>,
+    devices: Vec<PulseDimEntry>,
+    ua_families: Vec<PulseDimEntry>,
+    source_types: Vec<PulseDimEntry>,
+    ref_hosts: Vec<PulseDimEntry>,
+    countries: Vec<PulseDimEntry>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PulseRange {
+    from: String,
+    to: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PulseSummary {
+    pv: i64,
+    uv: i64,
+    avg_duration_ms: Option<i64>,
+    total_duration_ms: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PulseDailyEntry {
+    day: String,
+    pv: i64,
+    uv: i64,
+    avg_duration_ms: Option<i64>,
+    total_duration_ms: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PulseTopPathEntry {
+    path: String,
+    pv: i64,
+    uv: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PulseDimEntry {
+    value: String,
+    count: i64,
+}
+
+pub async fn list_pulse_sites(
+    State(state): State<AppState>,
+) -> Result<Json<PulseSitesResponse>, PulseAdminError> {
+    let pool = state.db.as_ref().ok_or(PulseAdminError::DbUnavailable)?;
+    let sites = list_sites(pool).await?;
+    let items = sites.into_iter().map(map_site_entry).collect::<Vec<_>>();
+    Ok(Json(PulseSitesResponse {
+        total: items.len(),
+        items,
+    }))
+}
+
+pub async fn get_pulse_site(
+    State(state): State<AppState>,
+    Query(query): Query<PulseSiteQuery>,
+) -> Result<Json<PulseSiteStatsResponse>, PulseAdminError> {
+    let site = normalize_site_param(query.site.as_deref())?;
+    let (from, to) = parse_range(query.from.as_deref(), query.to.as_deref())?;
+    let limit = clamp_limit(query.limit);
+    let pool = state.db.as_ref().ok_or(PulseAdminError::DbUnavailable)?;
+    let totals = fetch_totals(pool, &site, from, to).await?;
+    let daily = fetch_daily(pool, &site, from, to).await?;
+    let top_paths = fetch_top_paths(pool, &site, from, to, limit).await?;
+    let devices = fetch_device_counts(pool, &site, from, to, limit).await?;
+    let ua_families = fetch_ua_counts(pool, &site, from, to, limit).await?;
+    let source_types = fetch_source_counts(pool, &site, from, to, limit).await?;
+    let ref_hosts = fetch_ref_host_counts(pool, &site, from, to, limit).await?;
+    let countries = fetch_country_counts(pool, &site, from, to, limit).await?;
+
+    Ok(Json(PulseSiteStatsResponse {
+        site,
+        range: PulseRange {
+            from: from.to_string(),
+            to: to.to_string(),
+        },
+        summary: map_summary(totals),
+        daily: daily.into_iter().map(map_daily_entry).collect(),
+        top_paths: top_paths.into_iter().map(map_top_path).collect(),
+        devices: devices.into_iter().map(map_dim_entry).collect(),
+        ua_families: ua_families.into_iter().map(map_dim_entry).collect(),
+        source_types: source_types.into_iter().map(map_dim_entry).collect(),
+        ref_hosts: ref_hosts.into_iter().map(map_dim_entry).collect(),
+        countries: countries.into_iter().map(map_dim_entry).collect(),
+    }))
+}
+
+fn map_site_entry(entry: PulseSiteOverview) -> PulseSiteEntry {
+    PulseSiteEntry {
+        site: entry.site,
+        pv: entry.pv,
+        uv: entry.uv,
+        last_seen_at: entry.last_seen_at.map(|value| value.to_rfc3339()),
+    }
+}
+
+fn map_summary(totals: PulseTotals) -> PulseSummary {
+    PulseSummary {
+        pv: totals.pv,
+        uv: totals.uv,
+        avg_duration_ms: round_duration(totals.avg_duration_ms),
+        total_duration_ms: totals.total_duration_ms,
+    }
+}
+
+fn map_daily_entry(entry: PulseDailyStat) -> PulseDailyEntry {
+    PulseDailyEntry {
+        day: entry.day.to_string(),
+        pv: entry.pv,
+        uv: entry.uv,
+        avg_duration_ms: round_duration(entry.avg_duration_ms),
+        total_duration_ms: entry.total_duration_ms,
+    }
+}
+
+fn map_top_path(entry: PulseTopPath) -> PulseTopPathEntry {
+    PulseTopPathEntry {
+        path: entry.path,
+        pv: entry.pv,
+        uv: entry.uv,
+    }
+}
+
+fn map_dim_entry(entry: PulseDimCount) -> PulseDimEntry {
+    PulseDimEntry {
+        value: entry.value,
+        count: entry.count,
+    }
+}
+
+fn round_duration(value: Option<f64>) -> Option<i64> {
+    value.map(|duration| duration.round() as i64)
+}
+
+fn parse_range(from: Option<&str>, to: Option<&str>) -> Result<(NaiveDate, NaiveDate), PulseAdminError> {
+    let today = Utc::now().date_naive();
+    let default_from = today - Duration::days(DEFAULT_RANGE_DAYS);
+    let from = from
+        .map(parse_date)
+        .transpose()?
+        .unwrap_or(default_from);
+    let to = to.map(parse_date).transpose()?.unwrap_or(today);
+    if from > to {
+        return Err(PulseAdminError::InvalidDateRange);
+    }
+    Ok((from, to))
+}
+
+fn parse_date(raw: &str) -> Result<NaiveDate, PulseAdminError> {
+    NaiveDate::parse_from_str(raw.trim(), "%Y-%m-%d").map_err(|_| PulseAdminError::InvalidDate)
+}
+
+fn normalize_site_param(value: Option<&str>) -> Result<String, PulseAdminError> {
+    let raw = value.unwrap_or("").trim();
+    if raw.is_empty() {
+        return Err(PulseAdminError::MissingSite);
+    }
+    let normalized = normalize_host_value(raw)?;
+    if normalized.len() > MAX_SITE_LEN {
+        return Err(PulseAdminError::InvalidSite);
+    }
+    Ok(normalized)
+}
+
+fn normalize_host_value(value: &str) -> Result<String, PulseAdminError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(PulseAdminError::InvalidSite);
+    }
+    let without_scheme = trimmed
+        .strip_prefix("https://")
+        .or_else(|| trimmed.strip_prefix("http://"))
+        .unwrap_or(trimmed);
+    let host_list = without_scheme.split(',').next().unwrap_or(without_scheme);
+    let host_port = host_list.split('@').last().unwrap_or(host_list);
+    let host = host_port.split(':').next().unwrap_or(host_port).trim();
+    if host.is_empty() || host.chars().any(|ch| ch.is_whitespace()) {
+        return Err(PulseAdminError::InvalidSite);
+    }
+    Ok(host.trim_end_matches('.').to_ascii_lowercase())
+}
+
+fn clamp_limit(limit: Option<i64>) -> i64 {
+    match limit {
+        Some(value) if value > 0 => value.min(MAX_TOP_LIMIT),
+        _ => DEFAULT_TOP_LIMIT,
+    }
+}
+
+impl IntoResponse for PulseAdminError {
+    fn into_response(self) -> axum::response::Response {
+        let (status, message) = match &self {
+            PulseAdminError::MissingSite
+            | PulseAdminError::InvalidSite
+            | PulseAdminError::InvalidDate
+            | PulseAdminError::InvalidDateRange => (StatusCode::BAD_REQUEST, self.to_string()),
+            PulseAdminError::DbUnavailable => (StatusCode::SERVICE_UNAVAILABLE, self.to_string()),
+            PulseAdminError::Db(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
+        };
+        let body = Json(ErrorBody { error: message });
+        (status, body).into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_site_param, parse_date, parse_range};
+
+    #[test]
+    fn parse_date_rejects_invalid() {
+        assert!(parse_date("2025-99-99").is_err());
+    }
+
+    #[test]
+    fn parse_range_defaults_to_today() {
+        let (from, to) = parse_range(None, None).unwrap();
+        assert!(from <= to);
+    }
+
+    #[test]
+    fn normalize_site_param_strips_scheme() {
+        let site = normalize_site_param(Some("https://Blog.Itswincer.com:443")).unwrap();
+        assert_eq!(site, "blog.itswincer.com");
+    }
+}
