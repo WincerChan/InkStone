@@ -38,8 +38,13 @@ pub fn build(state: AppState) -> Router {
 
 fn build_cors(state: &AppState) -> CorsLayer {
     let mut origins = Vec::new();
+    let mut allow_any = false;
     for origin in state.config.cors_allow_origins.iter() {
-        match HeaderValue::from_str(origin) {
+        if is_wildcard_origin(origin) {
+            allow_any = true;
+            break;
+        }
+        match HeaderValue::from_str(origin.trim()) {
             Ok(value) => origins.push(value),
             Err(_) => {
                 tracing::warn!(origin = %origin, "invalid CORS origin ignored");
@@ -49,11 +54,27 @@ fn build_cors(state: &AppState) -> CorsLayer {
 
     let cors = CorsLayer::new().allow_methods([Method::GET, Method::POST, Method::PUT, Method::OPTIONS]);
 
-    if origins.is_empty() {
+    if allow_any || origins.is_empty() {
         cors.allow_origin(Any).allow_headers(Any)
     } else {
         cors.allow_origin(AllowOrigin::list(origins))
             .allow_credentials(true)
             .allow_headers([CONTENT_TYPE])
+    }
+}
+
+fn is_wildcard_origin(origin: &str) -> bool {
+    origin.trim() == "*"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_wildcard_origin;
+
+    #[test]
+    fn wildcard_origin_matches_trimmed_star() {
+        assert!(is_wildcard_origin("*"));
+        assert!(is_wildcard_origin(" * "));
+        assert!(!is_wildcard_origin("https://example.com"));
     }
 }
