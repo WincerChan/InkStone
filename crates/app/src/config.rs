@@ -32,6 +32,7 @@ pub struct AppConfig {
     pub github_repo_name: Option<String>,
     pub github_discussion_category_id: Option<String>,
     pub cors_allow_origins: Vec<String>,
+    pub pulse_allowed_slds: Vec<String>,
 }
 
 #[derive(Debug, Error)]
@@ -96,6 +97,7 @@ impl AppConfig {
         let github_discussion_category_id =
             read_optional_string("INKSTONE_GITHUB_DISCUSSION_CATEGORY_ID")?;
         let cors_allow_origins = read_csv("INKSTONE_CORS_ALLOW_ORIGINS")?;
+        let pulse_allowed_slds = read_csv("INKSTONE_PULSE_ALLOWED_SLD")?;
 
         Ok(Self {
             http_addr,
@@ -124,6 +126,7 @@ impl AppConfig {
             github_repo_name,
             github_discussion_category_id,
             cors_allow_origins,
+            pulse_allowed_slds,
         })
     }
 }
