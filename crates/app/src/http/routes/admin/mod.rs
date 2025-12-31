@@ -3,3 +3,4 @@ pub mod comments_sync;
 pub mod douban_refresh;
 pub mod pulse;
 pub mod search_reindex;
+pub mod search_stats;

@@ -10,6 +10,8 @@ use tracing::{info, warn};
 
 use crate::state::AppState;
 use inkstone_core::domain::search::{SearchHit, SearchQuery, SearchResult};
+use inkstone_core::types::time_range::TimeRange;
+use inkstone_infra::db::{insert_search_event, SearchEvent};
 use inkstone_infra::search::{parse_query, QueryParseError, SearchIndexError, SearchSort};
 
 const MAX_QUERY_LEN: usize = 256;
@@ -136,13 +138,20 @@ pub async fn search(
         }
     };
 
+    let elapsed_ms = started_at.elapsed().as_millis();
+    if let Some(pool) = state.db.as_ref() {
+        let event = build_search_event(&query_text, &query, sort, result.total, elapsed_ms);
+        if let Err(err) = insert_search_event(pool, &event).await {
+            warn!(error = %err, "failed to store search event");
+        }
+    }
     info!(
         query_text = %query_text,
         limit,
         offset,
         sort = sort.as_str(),
         total = result.total,
-        elapsed_ms = started_at.elapsed().as_millis(),
+        elapsed_ms = elapsed_ms,
         "search request completed"
     );
     let hits = result
@@ -156,8 +165,101 @@ pub async fn search(
     Ok(Json(SearchResponse {
         total: result.total,
         hits,
-        elapsed_ms: started_at.elapsed().as_millis(),
+        elapsed_ms: elapsed_ms,
     }))
+}
+
+fn build_search_event(
+    query_text: &str,
+    query: &SearchQuery,
+    sort: SearchSortParam,
+    total: usize,
+    elapsed_ms: u128,
+) -> SearchEvent {
+    let raw = query_text.trim().to_string();
+    let keyword_count = query.keywords.len() as i32;
+    let mut keywords = query
+        .keywords
+        .iter()
+        .map(|value| normalize_token(value))
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    keywords.sort();
+    keywords.dedup();
+
+    let mut tags = query
+        .tags
+        .iter()
+        .map(|value| normalize_token(value))
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    tags.sort();
+    tags.dedup();
+
+    let category = query
+        .category
+        .as_ref()
+        .map(|value| normalize_token(value))
+        .filter(|value| !value.is_empty());
+
+    let mut parts = Vec::new();
+    if !keywords.is_empty() {
+        parts.push(keywords.join(" "));
+    }
+    if let Some(category_value) = category.as_ref() {
+        parts.push(format!("category:{category_value}"));
+    }
+    if !tags.is_empty() {
+        parts.push(format!("tags:{}", tags.join(",")));
+    }
+    if let Some(range) = query.range.as_ref() {
+        parts.push(format!("range:{}", format_range(range)));
+    }
+
+    let normalized = if parts.is_empty() {
+        raw.clone()
+    } else {
+        parts.join(" ")
+    };
+
+    SearchEvent {
+        query_raw: raw,
+        query_norm: normalized,
+        keyword_count,
+        tags,
+        category,
+        range_start: query.range.as_ref().and_then(|range| range.start),
+        range_end: query.range.as_ref().and_then(|range| range.end),
+        sort: sort.as_str().to_string(),
+        result_total: clamp_i32(total as i64),
+        elapsed_ms: clamp_i32(elapsed_ms as i64),
+    }
+}
+
+fn normalize_token(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
+fn format_range(range: &TimeRange) -> String {
+    let start = range
+        .start
+        .map(|value| value.format("%Y-%m-%d").to_string())
+        .unwrap_or_default();
+    let end = range
+        .end
+        .map(|value| value.format("%Y-%m-%d").to_string())
+        .unwrap_or_default();
+    format!("{start}~{end}")
+}
+
+fn clamp_i32(value: i64) -> i32 {
+    if value > i32::MAX as i64 {
+        i32::MAX
+    } else if value < i32::MIN as i64 {
+        i32::MIN
+    } else {
+        value as i32
+    }
 }
 
 fn enforce_query_length(query_text: &str) -> Result<(), SearchApiError> {

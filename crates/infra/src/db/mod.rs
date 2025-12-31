@@ -6,6 +6,7 @@ pub mod likes_repo;
 pub mod migrations;
 pub mod pool;
 pub mod pulse_admin_repo;
+pub mod search_events_repo;
 
 pub use analytics_repo::{upsert_engagement, upsert_page_view, AnalyticsRepoError, PageViewRecord};
 pub use comments_repo::{
@@ -23,6 +24,12 @@ pub use pulse_admin_repo::{
     fetch_country_counts, fetch_daily, fetch_device_counts, fetch_ref_host_counts, fetch_source_counts,
     fetch_totals, fetch_top_paths, fetch_ua_counts, list_sites, PulseDailyStat, PulseDimCount,
     PulseSiteOverview, PulseTopPath, PulseTotals,
+};
+pub use search_events_repo::{
+    fetch_filter_usage, fetch_keyword_usage, fetch_search_daily, fetch_search_summary, fetch_sort_usage,
+    fetch_top_categories, fetch_top_queries, fetch_top_tags, insert_search_event, SearchDailyRow,
+    SearchDimCount as SearchDimCountRow, SearchEvent, SearchEventsRepoError, SearchFilterUsage,
+    SearchKeywordUsage, SearchSortUsage, SearchSummaryRow, SearchTopQueryRow,
 };
 pub use migrations::run_migrations;
 pub use pool::{connect_lazy, DbPool, DbPoolError};
