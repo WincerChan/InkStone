@@ -7,7 +7,7 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
 use crate::http::middleware::{bid_cookie, search_query_limit};
 use crate::state::AppState;
-use crate::http::routes::{analytics, comments, douban, health, kudos, search, webhook};
+use crate::http::routes::{admin, analytics, comments, douban, health, kudos, search, webhook};
 
 pub fn build(state: AppState) -> Router {
     let cors = build_cors(&state);
@@ -23,6 +23,8 @@ pub fn build(state: AppState) -> Router {
         .route("/v2/kudos", get(kudos::get_kudos).put(kudos::put_kudos))
         .route("/v2/pulse/pv", post(analytics::post_pv))
         .route("/v2/pulse/engage", post(analytics::post_engage))
+        .route("/v2/admin/pulse/sites", get(admin::pulse::list_pulse_sites))
+        .route("/v2/admin/pulse/site", get(admin::pulse::get_pulse_site))
         .route("/webhook/github/content", post(webhook::github_webhook))
         .route(
             "/webhook/github/discussions",
