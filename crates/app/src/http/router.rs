@@ -11,7 +11,7 @@ use crate::http::routes::{analytics, comments, douban, health, kudos, search, we
 
 pub fn build(state: AppState) -> Router {
     let cors = build_cors(&state);
-    Router::new()
+    let mut router = Router::new()
         .route("/health", get(health::health))
         .route(
             "/v2/search",
@@ -32,11 +32,14 @@ pub fn build(state: AppState) -> Router {
             state.clone(),
             bid_cookie::ensure_bid_cookie,
         ))
-        .layer(cors)
-        .with_state(state)
+        .with_state(state);
+    if let Some(cors) = cors {
+        router = router.layer(cors);
+    }
+    router
 }
 
-fn build_cors(state: &AppState) -> CorsLayer {
+fn build_cors(state: &AppState) -> Option<CorsLayer> {
     let mut origins = Vec::new();
     let mut allow_any = false;
     for origin in state.config.cors_allow_origins.iter() {
@@ -54,12 +57,18 @@ fn build_cors(state: &AppState) -> CorsLayer {
 
     let cors = CorsLayer::new().allow_methods([Method::GET, Method::POST, Method::PUT, Method::OPTIONS]);
 
-    if allow_any || origins.is_empty() {
-        cors.allow_origin(Any).allow_headers(Any)
+    if !should_enable_cors(allow_any, &origins) {
+        return None;
+    }
+
+    if allow_any {
+        Some(cors.allow_origin(Any).allow_headers(Any))
     } else {
-        cors.allow_origin(AllowOrigin::list(origins))
-            .allow_credentials(true)
-            .allow_headers([CONTENT_TYPE])
+        Some(
+            cors.allow_origin(AllowOrigin::list(origins))
+                .allow_credentials(true)
+                .allow_headers([CONTENT_TYPE]),
+        )
     }
 }
 
@@ -67,14 +76,26 @@ fn is_wildcard_origin(origin: &str) -> bool {
     origin.trim() == "*"
 }
 
+fn should_enable_cors(allow_any: bool, origins: &[HeaderValue]) -> bool {
+    allow_any || !origins.is_empty()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::is_wildcard_origin;
+    use super::{is_wildcard_origin, should_enable_cors};
+    use axum::http::HeaderValue;
 
     #[test]
     fn wildcard_origin_matches_trimmed_star() {
         assert!(is_wildcard_origin("*"));
         assert!(is_wildcard_origin(" * "));
         assert!(!is_wildcard_origin("https://example.com"));
+    }
+
+    #[test]
+    fn cors_enablement_requires_origin_or_wildcard() {
+        assert!(!should_enable_cors(false, &[]));
+        assert!(should_enable_cors(true, &[]));
+        assert!(should_enable_cors(false, &[HeaderValue::from_static("https://example.com")]));
     }
 }
