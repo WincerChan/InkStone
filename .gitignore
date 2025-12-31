@@ -1,5 +1,6 @@
 /target
 .env
+docs/api_private.md
 
 
 # Added by cargo
