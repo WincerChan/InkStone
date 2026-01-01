@@ -25,6 +25,7 @@ pub fn build(state: AppState) -> Router {
         .route("/v2/pulse/engage", post(analytics::post_engage))
         .route("/v2/admin/pulse/sites", get(admin::pulse::list_pulse_sites))
         .route("/v2/admin/pulse/site", get(admin::pulse::get_pulse_site))
+        .route("/v2/admin/health", get(admin::health::get_admin_health))
         .route(
             "/v2/admin/search/stats",
             get(admin::search_stats::get_search_stats),

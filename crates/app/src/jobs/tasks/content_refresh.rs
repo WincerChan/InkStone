@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use chrono::Utc;
 use tracing::{debug, warn};
 
 use crate::jobs::JobError;
@@ -11,6 +12,10 @@ const FEED_BACKOFF: Duration = Duration::from_secs(60);
 const PATHS_BACKOFF: Duration = Duration::from_secs(60);
 
 pub async fn run(state: &AppState, rebuild: bool, force: bool) -> Result<JobStats, JobError> {
+    {
+        let mut health = state.admin_health.lock().await;
+        health.content_refresh_last_run = Some(Utc::now());
+    }
     let now = Instant::now();
     let paths_backoff = if force || rebuild {
         None
@@ -81,6 +86,10 @@ pub async fn run(state: &AppState, rebuild: bool, force: bool) -> Result<JobStat
         }
     }
 
+    {
+        let mut health = state.admin_health.lock().await;
+        health.content_refresh_last_success = Some(Utc::now());
+    }
     Ok(stats)
 }
 

@@ -41,6 +41,10 @@ struct CommentsConfig {
 }
 
 pub async fn run(state: &AppState, rebuild: bool) -> Result<CommentsSyncStats, JobError> {
+    {
+        let mut health = state.admin_health.lock().await;
+        health.comments_sync_last_run = Some(Utc::now());
+    }
     let Some(pool) = state.db.as_ref() else {
         return Err(JobError::Comments("db not configured".to_string()));
     };
@@ -111,6 +115,10 @@ pub async fn run(state: &AppState, rebuild: bool) -> Result<CommentsSyncStats, J
         }
     }
 
+    {
+        let mut health = state.admin_health.lock().await;
+        health.comments_sync_last_success = Some(Utc::now());
+    }
     Ok(stats)
 }
 

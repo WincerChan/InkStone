@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use chrono::NaiveDate;
+use chrono::{NaiveDate, Utc};
 use scraper::{ElementRef, Html, Selector};
 use serde::Serialize;
 use tracing::{debug, info, warn};
@@ -62,10 +62,18 @@ impl DoubanCategory {
 }
 
 pub async fn run(state: &AppState, rebuild: bool) -> Result<(), JobError> {
+    {
+        let mut health = state.admin_health.lock().await;
+        health.douban_crawl_last_run = Some(Utc::now());
+    }
     let uid = state.config.douban_uid.as_str();
     for category in [DoubanCategory::Movie, DoubanCategory::Book, DoubanCategory::Game] {
         let items = fetch_all_pages(state, category, uid, rebuild).await?;
         log_items(category, &items);
+    }
+    {
+        let mut health = state.admin_health.lock().await;
+        health.douban_crawl_last_success = Some(Utc::now());
     }
     Ok(())
 }
@@ -75,9 +83,17 @@ pub async fn run_for_category(
     rebuild: bool,
     category: DoubanCategory,
 ) -> Result<(), JobError> {
+    {
+        let mut health = state.admin_health.lock().await;
+        health.douban_crawl_last_run = Some(Utc::now());
+    }
     let uid = state.config.douban_uid.as_str();
     let items = fetch_all_pages(state, category, uid, rebuild).await?;
     log_items(category, &items);
+    {
+        let mut health = state.admin_health.lock().await;
+        health.douban_crawl_last_success = Some(Utc::now());
+    }
     Ok(())
 }
 
