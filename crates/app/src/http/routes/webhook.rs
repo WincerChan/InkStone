@@ -2,6 +2,7 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
+use chrono::Utc;
 use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use sha2::Sha256;
@@ -76,6 +77,10 @@ pub async fn github_webhook(
         warn!(event, "github webhook invalid signature");
         return Err(WebhookError::InvalidSignature);
     }
+    {
+        let mut health = state.admin_health.lock().await;
+        health.webhook_content_last_received = Some(Utc::now());
+    }
 
     if event.eq_ignore_ascii_case("ping") {
         info!("github webhook ping received");
@@ -130,6 +135,10 @@ pub async fn github_discussion_webhook(
     if !verify_signature(secret, &body, signature) {
         warn!(event, "github discussion webhook invalid signature");
         return Err(WebhookError::InvalidSignature);
+    }
+    {
+        let mut health = state.admin_health.lock().await;
+        health.webhook_discussions_last_received = Some(Utc::now());
     }
 
     if event.eq_ignore_ascii_case("ping") {

@@ -1,3 +1,4 @@
+use chrono::Utc;
 use tracing::{info, warn};
 
 use crate::jobs::JobError;
@@ -23,6 +24,10 @@ pub async fn load(state: &AppState) -> Result<(), JobError> {
 }
 
 pub async fn flush(state: &AppState) -> Result<(), JobError> {
+    {
+        let mut health = state.admin_health.lock().await;
+        health.kudos_flush_last_run = Some(Utc::now());
+    }
     let Some(pool) = state.db.as_ref() else {
         warn!("kudos cache flush skipped: db not configured");
         return Ok(());
@@ -48,5 +53,9 @@ pub async fn flush(state: &AppState) -> Result<(), JobError> {
         }
     }
     info!(pending = pending_len, inserted, "kudos cache flushed");
+    {
+        let mut health = state.admin_health.lock().await;
+        health.kudos_flush_last_success = Some(Utc::now());
+    }
     Ok(())
 }
