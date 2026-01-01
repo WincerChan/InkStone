@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod analytics_summary;
 pub mod comments_sync;
 pub mod douban_refresh;

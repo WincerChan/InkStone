@@ -168,6 +168,8 @@ mod tests {
             github_discussion_category_id: None,
             cors_allow_origins: Vec::new(),
             pulse_allowed_slds: Vec::new(),
+            admin_password_hash: None,
+            admin_token_secret: None,
         };
         AppState {
             config: Arc::new(config),
