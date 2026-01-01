@@ -113,16 +113,27 @@ pub async fn get_search_stats(
 ) -> Result<Json<SearchStatsResponse>, SearchStatsError> {
     let (from, to) = parse_range(query.from.as_deref(), query.to.as_deref())?;
     let limit = clamp_limit(query.limit);
-    let pool = state.db.as_ref().ok_or(SearchStatsError::DbUnavailable)?;
+    let pool = state.db.as_ref().ok_or(SearchStatsError::DbUnavailable)?.clone();
 
-    let summary = fetch_search_summary(pool, from, to).await?;
-    let daily = fetch_search_daily(pool, from, to).await?;
-    let top_queries = fetch_top_queries(pool, from, to, limit).await?;
-    let top_tags = fetch_top_tags(pool, from, to, limit).await?;
-    let top_categories = fetch_top_categories(pool, from, to, limit).await?;
-    let filter_usage = fetch_filter_usage(pool, from, to).await?;
-    let sort_usage = fetch_sort_usage(pool, from, to, limit).await?;
-    let keyword_usage = fetch_keyword_usage(pool, from, to, limit).await?;
+    let (
+        summary,
+        daily,
+        top_queries,
+        top_tags,
+        top_categories,
+        filter_usage,
+        sort_usage,
+        keyword_usage,
+    ) = tokio::try_join!(
+        fetch_search_summary(&pool, from, to),
+        fetch_search_daily(&pool, from, to),
+        fetch_top_queries(&pool, from, to, limit),
+        fetch_top_tags(&pool, from, to, limit),
+        fetch_top_categories(&pool, from, to, limit),
+        fetch_filter_usage(&pool, from, to),
+        fetch_sort_usage(&pool, from, to, limit),
+        fetch_keyword_usage(&pool, from, to, limit),
+    )?;
 
     Ok(Json(SearchStatsResponse {
         range: SearchRange {

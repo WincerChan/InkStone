@@ -163,15 +163,19 @@ pub async fn get_pulse_site(
     let site = normalize_site_param(query.site.as_deref())?;
     let (from, to) = parse_range(query.from.as_deref(), query.to.as_deref())?;
     let limit = clamp_limit(query.limit);
-    let pool = state.db.as_ref().ok_or(PulseAdminError::DbUnavailable)?;
-    let totals = fetch_totals(pool, &site, from, to).await?;
-    let daily = fetch_daily(pool, &site, from, to).await?;
-    let top_paths = fetch_top_paths(pool, &site, from, to, limit).await?;
-    let devices = fetch_device_counts(pool, &site, from, to, limit).await?;
-    let ua_families = fetch_ua_counts(pool, &site, from, to, limit).await?;
-    let source_types = fetch_source_counts(pool, &site, from, to, limit).await?;
-    let ref_hosts = fetch_ref_host_counts(pool, &site, from, to, limit).await?;
-    let countries = fetch_country_counts(pool, &site, from, to, limit).await?;
+    let pool = state.db.as_ref().ok_or(PulseAdminError::DbUnavailable)?.clone();
+
+    let (totals, daily, top_paths, devices, ua_families, source_types, ref_hosts, countries) =
+        tokio::try_join!(
+            fetch_totals(&pool, &site, from, to),
+            fetch_daily(&pool, &site, from, to),
+            fetch_top_paths(&pool, &site, from, to, limit),
+            fetch_device_counts(&pool, &site, from, to, limit),
+            fetch_ua_counts(&pool, &site, from, to, limit),
+            fetch_source_counts(&pool, &site, from, to, limit),
+            fetch_ref_host_counts(&pool, &site, from, to, limit),
+            fetch_country_counts(&pool, &site, from, to, limit),
+        )?;
 
     Ok(Json(PulseSiteStatsResponse {
         site,
@@ -197,15 +201,18 @@ pub async fn get_pulse_active(
     let site = normalize_site_param(query.site.as_deref())?;
     let minutes = parse_active_minutes(query.minutes)?;
     let limit = clamp_limit(query.limit);
-    let pool = state.db.as_ref().ok_or(PulseAdminError::DbUnavailable)?;
+    let pool = state.db.as_ref().ok_or(PulseAdminError::DbUnavailable)?.clone();
     let (from, to) = active_range(minutes);
-    let totals = fetch_active_totals(pool, &site, from, to).await?;
-    let top_paths = fetch_active_top_paths(pool, &site, from, to, limit).await?;
-    let devices = fetch_active_device_counts(pool, &site, from, to, limit).await?;
-    let ua_families = fetch_active_ua_counts(pool, &site, from, to, limit).await?;
-    let source_types = fetch_active_source_counts(pool, &site, from, to, limit).await?;
-    let ref_hosts = fetch_active_ref_host_counts(pool, &site, from, to, limit).await?;
-    let countries = fetch_active_country_counts(pool, &site, from, to, limit).await?;
+    let (totals, top_paths, devices, ua_families, source_types, ref_hosts, countries) =
+        tokio::try_join!(
+            fetch_active_totals(&pool, &site, from, to),
+            fetch_active_top_paths(&pool, &site, from, to, limit),
+            fetch_active_device_counts(&pool, &site, from, to, limit),
+            fetch_active_ua_counts(&pool, &site, from, to, limit),
+            fetch_active_source_counts(&pool, &site, from, to, limit),
+            fetch_active_ref_host_counts(&pool, &site, from, to, limit),
+            fetch_active_country_counts(&pool, &site, from, to, limit),
+        )?;
 
     Ok(Json(PulseActiveResponse {
         site,

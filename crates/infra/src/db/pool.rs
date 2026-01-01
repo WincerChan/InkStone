@@ -15,6 +15,6 @@ pub enum DbPoolError {
 
 pub fn connect_lazy(database_url: &str) -> Result<DbPool, DbPoolError> {
     Ok(PgPoolOptions::new()
-        .max_connections(5)
+        .max_connections(15)
         .connect_lazy(database_url)?)
 }
