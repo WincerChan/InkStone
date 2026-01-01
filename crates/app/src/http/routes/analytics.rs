@@ -22,6 +22,7 @@ pub struct PulsePvRequest {
     pub page_instance_id: Option<String>,
     pub path: Option<String>,
     pub site: Option<String>,
+    pub referrer: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,7 +82,11 @@ pub async fn post_pv(
     let ua = header_value(&headers, "user-agent");
     let ua_family = ua.and_then(parse_ua_family);
     let device = ua.and_then(parse_device);
-    let ref_host = header_value(&headers, REFERER.as_str()).and_then(parse_ref_host);
+    let ref_host = payload
+        .referrer
+        .as_deref()
+        .and_then(parse_ref_host)
+        .or_else(|| header_value(&headers, REFERER.as_str()).and_then(parse_ref_host));
     let source_type = Some(if ref_host.is_some() {
         "referral".to_string()
     } else {
