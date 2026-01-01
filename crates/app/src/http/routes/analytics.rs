@@ -114,8 +114,8 @@ pub async fn post_pv(
         session_start_ts: Some(session.session_start_ts),
         ua_family,
         device,
-        source_type: session.entry_source_type,
-        ref_host: session.entry_ref_host,
+        entry_source_type: session.entry_source_type,
+        entry_ref_host: session.entry_ref_host,
         country,
     };
     upsert_page_view(pool, &record).await?;

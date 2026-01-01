@@ -20,8 +20,8 @@ pub struct PageViewRecord {
     pub session_start_ts: Option<DateTime<Utc>>,
     pub ua_family: Option<String>,
     pub device: Option<String>,
-    pub source_type: Option<String>,
-    pub ref_host: Option<String>,
+    pub entry_source_type: Option<String>,
+    pub entry_ref_host: Option<String>,
     pub country: Option<String>,
 }
 
@@ -48,8 +48,8 @@ pub async fn upsert_page_view(
             session_start_ts,
             ua_family,
             device,
-            source_type,
-            ref_host,
+            entry_source_type,
+            entry_ref_host,
             country
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
@@ -61,8 +61,8 @@ pub async fn upsert_page_view(
             session_start_ts = EXCLUDED.session_start_ts,
             ua_family = EXCLUDED.ua_family,
             device = EXCLUDED.device,
-            source_type = EXCLUDED.source_type,
-            ref_host = EXCLUDED.ref_host,
+            entry_source_type = EXCLUDED.entry_source_type,
+            entry_ref_host = EXCLUDED.entry_ref_host,
             country = EXCLUDED.country,
             duration_ms = pulse_events.duration_ms
         "#,
@@ -76,8 +76,8 @@ pub async fn upsert_page_view(
     .bind(record.session_start_ts)
     .bind(record.ua_family.as_deref())
     .bind(record.device.as_deref())
-    .bind(record.source_type.as_deref())
-    .bind(record.ref_host.as_deref())
+    .bind(record.entry_source_type.as_deref())
+    .bind(record.entry_ref_host.as_deref())
     .bind(record.country.as_deref())
     .execute(pool)
     .await?;

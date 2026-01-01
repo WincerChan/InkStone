@@ -228,7 +228,7 @@ pub async fn fetch_source_stats(
     let rows = sqlx::query_as::<_, PulseDimStats>(
         r#"
         SELECT
-            COALESCE(NULLIF(source_type, ''), 'unknown') AS value,
+            COALESCE(NULLIF(entry_source_type, ''), 'unknown') AS value,
             COUNT(*)::bigint AS pv,
             COUNT(DISTINCT user_stats_id)::bigint AS uv
         FROM pulse_events
@@ -258,7 +258,7 @@ pub async fn fetch_ref_host_stats(
     let rows = sqlx::query_as::<_, PulseDimStats>(
         r#"
         SELECT
-            COALESCE(NULLIF(ref_host, ''), 'unknown') AS value,
+            COALESCE(NULLIF(entry_ref_host, ''), 'unknown') AS value,
             COUNT(*)::bigint AS pv,
             COUNT(DISTINCT user_stats_id)::bigint AS uv
         FROM pulse_events
