@@ -154,7 +154,7 @@ pub struct PulseTopPathEntry {
 #[derive(Debug, Serialize)]
 pub struct PulseDimEntry {
     value: String,
-    count: i64,
+    uv: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -310,7 +310,7 @@ fn map_top_path(entry: PulseTopPath) -> PulseTopPathEntry {
 fn map_dim_entry(entry: PulseDimCount) -> PulseDimEntry {
     PulseDimEntry {
         value: entry.value,
-        count: entry.count,
+        uv: entry.count,
     }
 }
 
