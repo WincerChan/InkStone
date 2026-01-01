@@ -19,6 +19,12 @@ pub struct KudosOverview {
     pub paths: i64,
 }
 
+#[derive(Debug, Clone)]
+pub struct KudosPathCount {
+    pub path: String,
+    pub count: i64,
+}
+
 pub async fn insert_kudos(
     pool: &PgPool,
     path: &str,
@@ -102,4 +108,30 @@ pub async fn fetch_kudos_overview(pool: &PgPool) -> Result<KudosOverview, KudosR
         .fetch_one(pool)
         .await?;
     Ok(KudosOverview { total, paths })
+}
+
+pub async fn fetch_kudos_top_paths(
+    pool: &PgPool,
+    limit: i64,
+) -> Result<Vec<KudosPathCount>, KudosRepoError> {
+    let rows = sqlx::query(
+        r#"
+        SELECT path, COUNT(*) AS count
+        FROM kudos
+        GROUP BY path
+        ORDER BY count DESC, path ASC
+        LIMIT $1
+        "#,
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    let mut items = Vec::with_capacity(rows.len());
+    for row in rows {
+        items.push(KudosPathCount {
+            path: row.try_get("path")?,
+            count: row.try_get("count")?,
+        });
+    }
+    Ok(items)
 }
