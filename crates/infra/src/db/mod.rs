@@ -15,8 +15,8 @@ pub use comments_repo::{
     CommentsOverview, CommentsRepoError, DiscussionRecord,
 };
 pub use douban_repo::{
-    fetch_douban_marks_by_range, insert_douban_items, upsert_douban_items, DoubanItemRecord,
-    DoubanMarkRecord, DoubanRepoError,
+    fetch_douban_marks_by_range, fetch_douban_overview, insert_douban_items, upsert_douban_items,
+    DoubanItemRecord, DoubanMarkRecord, DoubanOverview, DoubanRepoError, DoubanTypeCount,
 };
 pub use kudos_repo::{
     count_kudos, has_kudos, insert_kudos, load_all_kudos, KudosEntry, KudosRepoError,

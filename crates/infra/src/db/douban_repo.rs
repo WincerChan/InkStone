@@ -23,6 +23,20 @@ pub struct DoubanMarkRecord {
     pub date: NaiveDate,
 }
 
+#[derive(Debug, Clone)]
+pub struct DoubanTypeCount {
+    pub item_type: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct DoubanOverview {
+    pub total: i64,
+    pub with_date: i64,
+    pub last_date: Option<NaiveDate>,
+    pub types: Vec<DoubanTypeCount>,
+}
+
 #[derive(Debug, Error)]
 pub enum DoubanRepoError {
     #[error("sqlx error: {0}")]
@@ -135,4 +149,43 @@ pub async fn fetch_douban_marks_by_range(
         });
     }
     Ok(items)
+}
+
+pub async fn fetch_douban_overview(pool: &PgPool) -> Result<DoubanOverview, DoubanRepoError> {
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM douban_items")
+        .fetch_one(pool)
+        .await?;
+    let with_date: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM douban_items WHERE date IS NOT NULL",
+    )
+    .fetch_one(pool)
+    .await?;
+    let last_date: Option<NaiveDate> =
+        sqlx::query_scalar("SELECT MAX(date) FROM douban_items")
+            .fetch_one(pool)
+            .await?;
+    let rows = sqlx::query(
+        r#"
+        SELECT "type", COUNT(*) AS count
+        FROM douban_items
+        GROUP BY "type"
+        ORDER BY "type" ASC
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut types = Vec::with_capacity(rows.len());
+    for row in rows {
+        types.push(DoubanTypeCount {
+            item_type: row.try_get("type")?,
+            count: row.try_get("count")?,
+        });
+    }
+
+    Ok(DoubanOverview {
+        total,
+        with_date,
+        last_date,
+        types,
+    })
 }
