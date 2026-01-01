@@ -8,7 +8,10 @@ pub mod pool;
 pub mod pulse_admin_repo;
 pub mod search_events_repo;
 
-pub use analytics_repo::{upsert_engagement, upsert_page_view, AnalyticsRepoError, PageViewRecord};
+pub use analytics_repo::{
+    touch_visitor_last_seen, upsert_engagement, upsert_page_view, upsert_visitor,
+    AnalyticsRepoError, PageViewRecord, VisitorSession,
+};
 pub use comments_repo::{
     fetch_comments_overview, find_discussion_by_discussion_id, find_discussion_by_post_id,
     list_comments, list_discussions, replace_comments, upsert_discussion, CommentRecord,

@@ -316,9 +316,9 @@ pub async fn fetch_active_totals(
         r#"
         SELECT
             COUNT(*)::bigint AS pv,
-            COUNT(DISTINCT user_stats_id)::bigint AS uv
-        FROM pulse_events
-        WHERE site = $1 AND ts BETWEEN $2 AND $3
+            COUNT(*)::bigint AS uv
+        FROM pulse_visitors
+        WHERE site = $1 AND last_seen_ts BETWEEN $2 AND $3
         "#,
     )
     .bind(site)
@@ -433,14 +433,14 @@ pub async fn fetch_active_source_counts(
     let rows = sqlx::query_as::<_, PulseDimCount>(
         r#"
         SELECT
-            source_type AS value,
+            entry_source_type AS value,
             COUNT(*)::bigint AS count
-        FROM pulse_events
+        FROM pulse_visitors
         WHERE site = $1
-          AND ts BETWEEN $2 AND $3
-          AND source_type IS NOT NULL
-          AND source_type <> ''
-        GROUP BY source_type
+          AND last_seen_ts BETWEEN $2 AND $3
+          AND entry_source_type IS NOT NULL
+          AND entry_source_type <> ''
+        GROUP BY entry_source_type
         ORDER BY count DESC
         LIMIT $4
         "#,
@@ -464,14 +464,14 @@ pub async fn fetch_active_ref_host_counts(
     let rows = sqlx::query_as::<_, PulseDimCount>(
         r#"
         SELECT
-            ref_host AS value,
+            entry_ref_host AS value,
             COUNT(*)::bigint AS count
-        FROM pulse_events
+        FROM pulse_visitors
         WHERE site = $1
-          AND ts BETWEEN $2 AND $3
-          AND ref_host IS NOT NULL
-          AND ref_host <> ''
-        GROUP BY ref_host
+          AND last_seen_ts BETWEEN $2 AND $3
+          AND entry_ref_host IS NOT NULL
+          AND entry_ref_host <> ''
+        GROUP BY entry_ref_host
         ORDER BY count DESC
         LIMIT $4
         "#,

@@ -12,7 +12,10 @@ use uuid::Uuid;
 
 use crate::http::middleware::bid_cookie::ClientIds;
 use crate::state::AppState;
-use inkstone_infra::db::{upsert_engagement, upsert_page_view, AnalyticsRepoError, PageViewRecord};
+use inkstone_infra::db::{
+    touch_visitor_last_seen, upsert_engagement, upsert_page_view, upsert_visitor,
+    AnalyticsRepoError, PageViewRecord,
+};
 
 const MAX_PATH_LEN: usize = 512;
 const MAX_SITE_LEN: usize = 255;
@@ -82,37 +85,46 @@ pub async fn post_pv(
     let ua = header_value(&headers, "user-agent");
     let ua_family = ua.and_then(parse_ua_family);
     let device = ua.and_then(parse_device);
-    let ref_host = payload
+    let raw_ref_host = payload
         .referrer
         .as_deref()
         .and_then(parse_ref_host)
         .or_else(|| header_value(&headers, REFERER.as_str()).and_then(parse_ref_host));
-    let source_type = Some(if ref_host.is_some() {
-        "referral".to_string()
-    } else {
-        "direct".to_string()
-    });
+    let (entry_source_type, entry_ref_host) = derive_entry_source(&site, raw_ref_host);
     let country = extract_country(&headers);
+    let stats_id = ids.stats_id.clone();
+    let now = Utc::now();
+    let pool = state.db.as_ref().ok_or(PulseApiError::DbUnavailable)?;
+    let session = upsert_visitor(
+        pool,
+        &site,
+        stats_id.as_slice(),
+        now,
+        entry_source_type.as_deref(),
+        entry_ref_host.as_deref(),
+    )
+    .await?;
     let record = PageViewRecord {
         page_instance_id,
         duration_ms: None,
-        user_stats_id: Some(ids.stats_id),
+        user_stats_id: Some(stats_id.clone()),
         path: Some(path),
         site: Some(site),
-        ts: Utc::now(),
+        ts: now,
+        session_start_ts: Some(session.session_start_ts),
         ua_family,
         device,
-        source_type,
-        ref_host,
+        source_type: session.entry_source_type,
+        ref_host: session.entry_ref_host,
         country,
     };
-    let pool = state.db.as_ref().ok_or(PulseApiError::DbUnavailable)?;
     upsert_page_view(pool, &record).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn post_engage(
     State(state): State<AppState>,
+    Extension(ids): Extension<ClientIds>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<StatusCode, PulseApiError> {
@@ -127,7 +139,9 @@ pub async fn post_engage(
         return Ok(StatusCode::NO_CONTENT);
     }
     let pool = state.db.as_ref().ok_or(PulseApiError::DbUnavailable)?;
+    let now = Utc::now();
     upsert_engagement(pool, page_instance_id, duration_ms).await?;
+    touch_visitor_last_seen(pool, &site, ids.stats_id.as_slice(), now).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -295,6 +309,25 @@ fn parse_ref_host(referer: &str) -> Option<String> {
     }
 }
 
+fn derive_entry_source(
+    site: &str,
+    raw_ref_host: Option<String>,
+) -> (Option<String>, Option<String>) {
+    let had_ref_host = raw_ref_host.is_some();
+    let entry_ref_host = raw_ref_host
+        .as_deref()
+        .filter(|host| !host.eq_ignore_ascii_case(site))
+        .map(|host| host.to_string());
+    let entry_source_type = if entry_ref_host.is_some() {
+        Some("referral".to_string())
+    } else if had_ref_host {
+        None
+    } else {
+        Some("direct".to_string())
+    };
+    (entry_source_type, entry_ref_host)
+}
+
 fn extract_country(headers: &HeaderMap) -> Option<String> {
     if let Some(value) = header_value(headers, "cf-ipcountry") {
         if !value.eq_ignore_ascii_case("xx") {
@@ -335,8 +368,8 @@ impl IntoResponse for PulseApiError {
 #[cfg(test)]
 mod tests {
     use super::{
-        extract_country, is_allowed_site, normalize_host_value, normalize_path, normalize_site,
-        parse_ref_host,
+        derive_entry_source, extract_country, is_allowed_site, normalize_host_value, normalize_path,
+        normalize_site, parse_ref_host,
     };
     use axum::http::HeaderMap;
 
@@ -381,6 +414,12 @@ mod tests {
     }
 
     #[test]
+    fn normalize_site_requires_host() {
+        let headers = HeaderMap::new();
+        assert!(normalize_site(None, &headers).is_err());
+    }
+
+    #[test]
     fn is_allowed_site_accepts_suffix_match() {
         let allowed = vec!["itswincer.com".to_string()];
         assert!(is_allowed_site("blog.itswincer.com", &allowed));
@@ -391,5 +430,13 @@ mod tests {
     fn is_allowed_site_allows_empty_list() {
         let allowed = Vec::new();
         assert!(is_allowed_site("blog.itswincer.com", &allowed));
+    }
+
+    #[test]
+    fn derive_entry_source_ignores_self_ref() {
+        let (source, ref_host) =
+            derive_entry_source("blog.itswincer.com", Some("blog.itswincer.com".to_string()));
+        assert!(source.is_none());
+        assert!(ref_host.is_none());
     }
 }
