@@ -13,6 +13,12 @@ pub struct KudosEntry {
     pub interaction_id: Vec<u8>,
 }
 
+#[derive(Debug, Clone)]
+pub struct KudosOverview {
+    pub total: i64,
+    pub paths: i64,
+}
+
 pub async fn insert_kudos(
     pool: &PgPool,
     path: &str,
@@ -86,4 +92,14 @@ pub async fn has_kudos(
     .fetch_optional(pool)
     .await?;
     Ok(row.is_some())
+}
+
+pub async fn fetch_kudos_overview(pool: &PgPool) -> Result<KudosOverview, KudosRepoError> {
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM kudos")
+        .fetch_one(pool)
+        .await?;
+    let paths: i64 = sqlx::query_scalar("SELECT COUNT(DISTINCT path) FROM kudos")
+        .fetch_one(pool)
+        .await?;
+    Ok(KudosOverview { total, paths })
 }

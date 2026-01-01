@@ -32,6 +32,19 @@ impl KudosCache {
             .unwrap_or(0)
     }
 
+    pub fn total_count(&self) -> i64 {
+        let total: usize = self.entries.values().map(|set| set.len()).sum();
+        i64::try_from(total).unwrap_or(i64::MAX)
+    }
+
+    pub fn path_count(&self) -> i64 {
+        i64::try_from(self.entries.len()).unwrap_or(i64::MAX)
+    }
+
+    pub fn pending_count(&self) -> i64 {
+        i64::try_from(self.pending.len()).unwrap_or(i64::MAX)
+    }
+
     pub fn has(&self, path: &str, interaction_id: &[u8]) -> bool {
         self.entries
             .get(path)
@@ -96,6 +109,19 @@ mod tests {
         assert_eq!(inserted, 1);
         assert_eq!(cache.take_pending().len(), 0);
         assert!(cache.has("/posts/a", &[9, 9]));
+    }
+
+    #[test]
+    fn counts_track_cache_state() {
+        let mut cache = KudosCache::default();
+        assert_eq!(cache.total_count(), 0);
+        assert_eq!(cache.path_count(), 0);
+        assert_eq!(cache.pending_count(), 0);
+        assert!(cache.insert("/posts/a", &[1]));
+        assert!(cache.insert("/posts/b", &[2]));
+        assert_eq!(cache.total_count(), 2);
+        assert_eq!(cache.path_count(), 2);
+        assert_eq!(cache.pending_count(), 2);
     }
 
     #[test]
