@@ -27,7 +27,7 @@ pub struct DoubanItem {
 }
 
 #[derive(Clone, Copy)]
-enum DoubanCategory {
+pub enum DoubanCategory {
     Movie,
     Book,
     Game,
@@ -67,6 +67,17 @@ pub async fn run(state: &AppState, rebuild: bool) -> Result<(), JobError> {
         let items = fetch_all_pages(state, category, uid, rebuild).await?;
         log_items(category, &items);
     }
+    Ok(())
+}
+
+pub async fn run_for_category(
+    state: &AppState,
+    rebuild: bool,
+    category: DoubanCategory,
+) -> Result<(), JobError> {
+    let uid = state.config.douban_uid.as_str();
+    let items = fetch_all_pages(state, category, uid, rebuild).await?;
+    log_items(category, &items);
     Ok(())
 }
 
