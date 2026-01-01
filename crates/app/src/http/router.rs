@@ -42,6 +42,18 @@ pub fn build(state: AppState) -> Router {
             post(admin::comments_sync::post_comments_rebuild),
         )
         .route(
+            "/v2/admin/douban/status",
+            get(admin::douban_refresh::get_douban_status),
+        )
+        .route(
+            "/v2/admin/douban/refresh",
+            post(admin::douban_refresh::post_douban_refresh),
+        )
+        .route(
+            "/v2/admin/douban/rebuild",
+            post(admin::douban_refresh::post_douban_rebuild),
+        )
+        .route(
             "/v2/admin/search/reindex",
             post(admin::search_reindex::post_search_reindex),
         )
