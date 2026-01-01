@@ -10,8 +10,9 @@ pub mod search_events_repo;
 
 pub use analytics_repo::{upsert_engagement, upsert_page_view, AnalyticsRepoError, PageViewRecord};
 pub use comments_repo::{
-    find_discussion_by_discussion_id, find_discussion_by_post_id, list_comments, list_discussions,
-    replace_comments, upsert_discussion, CommentRecord, CommentsRepoError, DiscussionRecord,
+    fetch_comments_overview, find_discussion_by_discussion_id, find_discussion_by_post_id,
+    list_comments, list_discussions, replace_comments, upsert_discussion, CommentRecord,
+    CommentsOverview, CommentsRepoError, DiscussionRecord,
 };
 pub use douban_repo::{
     fetch_douban_marks_by_range, insert_douban_items, upsert_douban_items, DoubanItemRecord,
