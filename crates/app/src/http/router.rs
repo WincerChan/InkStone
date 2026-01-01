@@ -29,6 +29,18 @@ pub fn build(state: AppState) -> Router {
             "/v2/admin/search/stats",
             get(admin::search_stats::get_search_stats),
         )
+        .route(
+            "/v2/admin/search/reindex",
+            post(admin::search_reindex::post_search_reindex),
+        )
+        .route(
+            "/v2/admin/search/refresh",
+            post(admin::search_reindex::post_search_refresh),
+        )
+        .route(
+            "/v2/admin/search/status",
+            get(admin::search_reindex::get_search_status),
+        )
         .route("/webhook/github/content", post(webhook::github_webhook))
         .route(
             "/webhook/github/discussions",

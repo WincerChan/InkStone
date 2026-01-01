@@ -54,6 +54,12 @@ pub struct SearchIndex {
     fields: SearchFields,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct SearchIndexStats {
+    pub num_docs: u64,
+    pub num_segments: usize,
+}
+
 impl SearchIndex {
     pub fn open_or_create(path: impl AsRef<Path>) -> Result<Self, SearchIndexError> {
         let dir = path.as_ref();
@@ -136,6 +142,14 @@ impl SearchIndex {
         }
 
         Ok(SearchResult { total, hits })
+    }
+
+    pub fn stats(&self) -> SearchIndexStats {
+        let searcher = self.reader.searcher();
+        SearchIndexStats {
+            num_docs: searcher.num_docs(),
+            num_segments: searcher.segment_readers().len(),
+        }
     }
 
     pub fn get_checksum(&self, id: &str) -> Result<Option<String>, SearchIndexError> {
@@ -221,6 +235,46 @@ impl SearchIndex {
             published_at: timestamp_to_datetime(published, "published")?,
             updated_at: timestamp_to_datetime(updated, "updated")?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SearchIndex;
+    use inkstone_core::domain::search::SearchDocument;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        std::env::temp_dir().join(format!("{name}-{nanos}"))
+    }
+
+    #[test]
+    fn stats_reflect_indexed_docs() {
+        let dir = temp_dir("inkstone-search-stats");
+        fs::create_dir_all(&dir).unwrap();
+        let index = SearchIndex::open_or_create(&dir).unwrap();
+        let doc = SearchDocument {
+            id: "doc-1".to_string(),
+            title: "Hello".to_string(),
+            subtitle: None,
+            content: "World".to_string(),
+            url: "https://example.com/posts/hello".to_string(),
+            tags: vec![],
+            category: None,
+            published_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            checksum: "checksum".to_string(),
+        };
+        index.upsert_documents(&[doc]).unwrap();
+        let stats = index.stats();
+        assert_eq!(stats.num_docs, 1);
+        let _ = fs::remove_dir_all(&dir);
     }
 }
 
