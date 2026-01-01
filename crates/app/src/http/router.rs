@@ -30,6 +30,18 @@ pub fn build(state: AppState) -> Router {
             get(admin::search_stats::get_search_stats),
         )
         .route(
+            "/v2/admin/comments/status",
+            get(admin::comments_sync::get_comments_status),
+        )
+        .route(
+            "/v2/admin/comments/sync",
+            post(admin::comments_sync::post_comments_sync),
+        )
+        .route(
+            "/v2/admin/comments/rebuild",
+            post(admin::comments_sync::post_comments_rebuild),
+        )
+        .route(
             "/v2/admin/search/reindex",
             post(admin::search_reindex::post_search_reindex),
         )

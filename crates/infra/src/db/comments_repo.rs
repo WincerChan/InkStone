@@ -34,6 +34,13 @@ pub struct CommentRecord {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone)]
+pub struct CommentsOverview {
+    pub discussions: i64,
+    pub comments: i64,
+    pub last_updated_at: Option<DateTime<Utc>>,
+}
+
 pub async fn upsert_discussion(
     pool: &PgPool,
     record: &DiscussionRecord,
@@ -175,6 +182,26 @@ pub async fn list_comments(
         });
     }
     Ok(comments)
+}
+
+pub async fn fetch_comments_overview(
+    pool: &PgPool,
+) -> Result<CommentsOverview, CommentsRepoError> {
+    let discussions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM comment_discussions")
+        .fetch_one(pool)
+        .await?;
+    let comments: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM comment_items")
+        .fetch_one(pool)
+        .await?;
+    let last_updated_at: Option<DateTime<Utc>> =
+        sqlx::query_scalar("SELECT MAX(updated_at) FROM comment_discussions")
+            .fetch_one(pool)
+            .await?;
+    Ok(CommentsOverview {
+        discussions,
+        comments,
+        last_updated_at,
+    })
 }
 
 async fn delete_comments(
