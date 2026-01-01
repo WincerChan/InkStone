@@ -2,18 +2,22 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
-use chrono::{Duration, NaiveDate, Utc};
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::state::AppState;
 use inkstone_infra::db::{
+    fetch_active_country_counts, fetch_active_device_counts, fetch_active_ref_host_counts,
+    fetch_active_source_counts, fetch_active_top_paths, fetch_active_totals, fetch_active_ua_counts,
     fetch_country_counts, fetch_daily, fetch_device_counts, fetch_ref_host_counts,
     fetch_source_counts, fetch_totals, fetch_top_paths, fetch_ua_counts, list_sites,
-    AnalyticsRepoError, PulseDailyStat, PulseDimCount, PulseSiteOverview, PulseTopPath, PulseTotals,
+    AnalyticsRepoError, PulseDailyStat, PulseDimCount, PulseSiteOverview, PulseTopPath,
+    PulseTotals,
 };
 
 const DEFAULT_RANGE_DAYS: i64 = 30;
+const DEFAULT_ACTIVE_MINUTES: i64 = 5;
 const DEFAULT_TOP_LIMIT: i64 = 20;
 const MAX_TOP_LIMIT: i64 = 200;
 const MAX_SITE_LEN: usize = 255;
@@ -26,12 +30,21 @@ pub struct PulseSiteQuery {
     pub limit: Option<i64>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PulseActiveQuery {
+    pub site: Option<String>,
+    pub minutes: Option<i64>,
+    pub limit: Option<i64>,
+}
+
 #[derive(Debug, Error)]
 pub enum PulseAdminError {
     #[error("site is required")]
     MissingSite,
     #[error("site is invalid")]
     InvalidSite,
+    #[error("active window is invalid")]
+    InvalidWindow,
     #[error("invalid date")]
     InvalidDate,
     #[error("invalid date range")]
@@ -76,7 +89,27 @@ pub struct PulseSiteStatsResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct PulseActiveResponse {
+    site: String,
+    range: PulseActiveRange,
+    active_pv: i64,
+    active_uv: i64,
+    top_paths: Vec<PulseTopPathEntry>,
+    devices: Vec<PulseDimEntry>,
+    ua_families: Vec<PulseDimEntry>,
+    source_types: Vec<PulseDimEntry>,
+    ref_hosts: Vec<PulseDimEntry>,
+    countries: Vec<PulseDimEntry>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct PulseRange {
+    from: String,
+    to: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PulseActiveRange {
     from: String,
     to: String,
 }
@@ -157,6 +190,40 @@ pub async fn get_pulse_site(
     }))
 }
 
+pub async fn get_pulse_active(
+    State(state): State<AppState>,
+    Query(query): Query<PulseActiveQuery>,
+) -> Result<Json<PulseActiveResponse>, PulseAdminError> {
+    let site = normalize_site_param(query.site.as_deref())?;
+    let minutes = parse_active_minutes(query.minutes)?;
+    let limit = clamp_limit(query.limit);
+    let pool = state.db.as_ref().ok_or(PulseAdminError::DbUnavailable)?;
+    let (from, to) = active_range(minutes);
+    let totals = fetch_active_totals(pool, &site, from, to).await?;
+    let top_paths = fetch_active_top_paths(pool, &site, from, to, limit).await?;
+    let devices = fetch_active_device_counts(pool, &site, from, to, limit).await?;
+    let ua_families = fetch_active_ua_counts(pool, &site, from, to, limit).await?;
+    let source_types = fetch_active_source_counts(pool, &site, from, to, limit).await?;
+    let ref_hosts = fetch_active_ref_host_counts(pool, &site, from, to, limit).await?;
+    let countries = fetch_active_country_counts(pool, &site, from, to, limit).await?;
+
+    Ok(Json(PulseActiveResponse {
+        site,
+        range: PulseActiveRange {
+            from: from.to_rfc3339(),
+            to: to.to_rfc3339(),
+        },
+        active_pv: totals.pv,
+        active_uv: totals.uv,
+        top_paths: top_paths.into_iter().map(map_top_path).collect(),
+        devices: devices.into_iter().map(map_dim_entry).collect(),
+        ua_families: ua_families.into_iter().map(map_dim_entry).collect(),
+        source_types: source_types.into_iter().map(map_dim_entry).collect(),
+        ref_hosts: ref_hosts.into_iter().map(map_dim_entry).collect(),
+        countries: countries.into_iter().map(map_dim_entry).collect(),
+    }))
+}
+
 fn map_site_entry(entry: PulseSiteOverview) -> PulseSiteEntry {
     PulseSiteEntry {
         site: entry.site,
@@ -198,6 +265,20 @@ fn map_dim_entry(entry: PulseDimCount) -> PulseDimEntry {
         value: entry.value,
         count: entry.count,
     }
+}
+
+fn active_range(minutes: i64) -> (DateTime<Utc>, DateTime<Utc>) {
+    let to = Utc::now();
+    let from = to - Duration::minutes(minutes);
+    (from, to)
+}
+
+fn parse_active_minutes(value: Option<i64>) -> Result<i64, PulseAdminError> {
+    let minutes = value.unwrap_or(DEFAULT_ACTIVE_MINUTES);
+    if minutes <= 0 {
+        return Err(PulseAdminError::InvalidWindow);
+    }
+    Ok(minutes)
 }
 
 fn round_duration(value: Option<f64>) -> Option<i64> {
@@ -264,6 +345,7 @@ impl IntoResponse for PulseAdminError {
         let (status, message) = match &self {
             PulseAdminError::MissingSite
             | PulseAdminError::InvalidSite
+            | PulseAdminError::InvalidWindow
             | PulseAdminError::InvalidDate
             | PulseAdminError::InvalidDateRange => (StatusCode::BAD_REQUEST, self.to_string()),
             PulseAdminError::DbUnavailable => (StatusCode::SERVICE_UNAVAILABLE, self.to_string()),
@@ -276,7 +358,7 @@ impl IntoResponse for PulseAdminError {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_site_param, parse_date, parse_range};
+    use super::{normalize_site_param, parse_active_minutes, parse_date, parse_range};
 
     #[test]
     fn parse_date_rejects_invalid() {
@@ -293,5 +375,15 @@ mod tests {
     fn normalize_site_param_strips_scheme() {
         let site = normalize_site_param(Some("https://Blog.Itswincer.com:443")).unwrap();
         assert_eq!(site, "blog.itswincer.com");
+    }
+
+    #[test]
+    fn parse_active_minutes_defaults_to_five() {
+        assert_eq!(parse_active_minutes(None).unwrap(), 5);
+    }
+
+    #[test]
+    fn parse_active_minutes_rejects_zero() {
+        assert!(parse_active_minutes(Some(0)).is_err());
     }
 }

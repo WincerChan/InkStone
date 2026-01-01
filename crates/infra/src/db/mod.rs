@@ -23,9 +23,11 @@ pub use kudos_repo::{
     load_all_kudos, KudosEntry, KudosOverview, KudosPathCount, KudosRepoError,
 };
 pub use pulse_admin_repo::{
-    fetch_country_counts, fetch_daily, fetch_device_counts, fetch_ref_host_counts, fetch_source_counts,
-    fetch_totals, fetch_top_paths, fetch_ua_counts, list_sites, PulseDailyStat, PulseDimCount,
-    PulseSiteOverview, PulseTopPath, PulseTotals,
+    fetch_active_country_counts, fetch_active_device_counts, fetch_active_ref_host_counts,
+    fetch_active_source_counts, fetch_active_top_paths, fetch_active_totals, fetch_active_ua_counts,
+    fetch_country_counts, fetch_daily, fetch_device_counts, fetch_ref_host_counts,
+    fetch_source_counts, fetch_totals, fetch_top_paths, fetch_ua_counts, list_sites, PulseDailyStat,
+    PulseDimCount, PulseSiteOverview, PulseTopPath, PulseTotals,
 };
 pub use search_events_repo::{
     fetch_filter_usage, fetch_keyword_usage, fetch_search_daily, fetch_search_summary, fetch_sort_usage,
