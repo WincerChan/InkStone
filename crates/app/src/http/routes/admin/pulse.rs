@@ -37,6 +37,12 @@ pub struct PulseActiveQuery {
     pub limit: Option<i64>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PulseActiveSummaryQuery {
+    pub site: Option<String>,
+    pub minutes: Option<i64>,
+}
+
 #[derive(Debug, Error)]
 pub enum PulseAdminError {
     #[error("site is required")]
@@ -100,6 +106,14 @@ pub struct PulseActiveResponse {
     source_types: Vec<PulseDimEntry>,
     ref_hosts: Vec<PulseDimEntry>,
     countries: Vec<PulseDimEntry>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PulseActiveSummaryResponse {
+    site: String,
+    range: PulseActiveRange,
+    active_pv: i64,
+    active_uv: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -231,6 +245,26 @@ pub async fn get_pulse_active(
     }))
 }
 
+pub async fn get_pulse_active_summary(
+    State(state): State<AppState>,
+    Query(query): Query<PulseActiveSummaryQuery>,
+) -> Result<Json<PulseActiveSummaryResponse>, PulseAdminError> {
+    let site = normalize_site_param(query.site.as_deref())?;
+    let minutes = parse_active_minutes(query.minutes)?;
+    let pool = state.db.as_ref().ok_or(PulseAdminError::DbUnavailable)?.clone();
+    let (from, to) = active_range(minutes);
+    let totals = fetch_active_totals(&pool, &site, from, to).await?;
+
+    Ok(Json(PulseActiveSummaryResponse {
+        site,
+        range: PulseActiveRange {
+            from: from.to_rfc3339(),
+            to: to.to_rfc3339(),
+        },
+        active_pv: totals.pv,
+        active_uv: totals.uv,
+    }))
+}
 fn map_site_entry(entry: PulseSiteOverview) -> PulseSiteEntry {
     PulseSiteEntry {
         site: entry.site,
