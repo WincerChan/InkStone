@@ -19,8 +19,8 @@ pub use douban_repo::{
     DoubanItemRecord, DoubanMarkRecord, DoubanOverview, DoubanRepoError, DoubanTypeCount,
 };
 pub use kudos_repo::{
-    count_kudos, fetch_kudos_overview, has_kudos, insert_kudos, load_all_kudos, KudosEntry,
-    KudosOverview, KudosRepoError,
+    count_kudos, fetch_kudos_overview, fetch_kudos_top_paths, has_kudos, insert_kudos,
+    load_all_kudos, KudosEntry, KudosOverview, KudosPathCount, KudosRepoError,
 };
 pub use pulse_admin_repo::{
     fetch_country_counts, fetch_daily, fetch_device_counts, fetch_ref_host_counts, fetch_source_counts,
