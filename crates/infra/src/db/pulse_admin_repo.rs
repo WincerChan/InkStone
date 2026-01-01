@@ -47,6 +47,13 @@ pub struct PulseDimCount {
     pub count: i64,
 }
 
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct PulseDimStats {
+    pub value: String,
+    pub pv: i64,
+    pub uv: i64,
+}
+
 pub async fn list_sites(pool: &PgPool) -> Result<Vec<PulseSiteOverview>, AnalyticsRepoError> {
     let rows = sqlx::query_as::<_, PulseSiteOverview>(
         r#"
@@ -151,25 +158,24 @@ pub async fn fetch_top_paths(
     Ok(rows)
 }
 
-pub async fn fetch_device_counts(
+pub async fn fetch_device_stats(
     pool: &PgPool,
     site: &str,
     from: NaiveDate,
     to: NaiveDate,
     limit: i64,
-) -> Result<Vec<PulseDimCount>, AnalyticsRepoError> {
-    let rows = sqlx::query_as::<_, PulseDimCount>(
+) -> Result<Vec<PulseDimStats>, AnalyticsRepoError> {
+    let rows = sqlx::query_as::<_, PulseDimStats>(
         r#"
         SELECT
-            device AS value,
-            COUNT(DISTINCT user_stats_id)::bigint AS count
+            COALESCE(NULLIF(device, ''), 'unknown') AS value,
+            COUNT(*)::bigint AS pv,
+            COUNT(DISTINCT user_stats_id)::bigint AS uv
         FROM pulse_events
         WHERE site = $1
           AND day BETWEEN $2 AND $3
-          AND device IS NOT NULL
-          AND device <> ''
-        GROUP BY device
-        ORDER BY count DESC
+        GROUP BY value
+        ORDER BY pv DESC
         LIMIT $4
         "#,
     )
@@ -182,25 +188,24 @@ pub async fn fetch_device_counts(
     Ok(rows)
 }
 
-pub async fn fetch_ua_counts(
+pub async fn fetch_ua_stats(
     pool: &PgPool,
     site: &str,
     from: NaiveDate,
     to: NaiveDate,
     limit: i64,
-) -> Result<Vec<PulseDimCount>, AnalyticsRepoError> {
-    let rows = sqlx::query_as::<_, PulseDimCount>(
+) -> Result<Vec<PulseDimStats>, AnalyticsRepoError> {
+    let rows = sqlx::query_as::<_, PulseDimStats>(
         r#"
         SELECT
-            ua_family AS value,
-            COUNT(DISTINCT user_stats_id)::bigint AS count
+            COALESCE(NULLIF(ua_family, ''), 'unknown') AS value,
+            COUNT(*)::bigint AS pv,
+            COUNT(DISTINCT user_stats_id)::bigint AS uv
         FROM pulse_events
         WHERE site = $1
           AND day BETWEEN $2 AND $3
-          AND ua_family IS NOT NULL
-          AND ua_family <> ''
-        GROUP BY ua_family
-        ORDER BY count DESC
+        GROUP BY value
+        ORDER BY pv DESC
         LIMIT $4
         "#,
     )
@@ -213,25 +218,24 @@ pub async fn fetch_ua_counts(
     Ok(rows)
 }
 
-pub async fn fetch_source_counts(
+pub async fn fetch_source_stats(
     pool: &PgPool,
     site: &str,
     from: NaiveDate,
     to: NaiveDate,
     limit: i64,
-) -> Result<Vec<PulseDimCount>, AnalyticsRepoError> {
-    let rows = sqlx::query_as::<_, PulseDimCount>(
+) -> Result<Vec<PulseDimStats>, AnalyticsRepoError> {
+    let rows = sqlx::query_as::<_, PulseDimStats>(
         r#"
         SELECT
-            source_type AS value,
-            COUNT(DISTINCT user_stats_id)::bigint AS count
+            COALESCE(NULLIF(source_type, ''), 'unknown') AS value,
+            COUNT(*)::bigint AS pv,
+            COUNT(DISTINCT user_stats_id)::bigint AS uv
         FROM pulse_events
         WHERE site = $1
           AND day BETWEEN $2 AND $3
-          AND source_type IS NOT NULL
-          AND source_type <> ''
-        GROUP BY source_type
-        ORDER BY count DESC
+        GROUP BY value
+        ORDER BY pv DESC
         LIMIT $4
         "#,
     )
@@ -244,25 +248,24 @@ pub async fn fetch_source_counts(
     Ok(rows)
 }
 
-pub async fn fetch_ref_host_counts(
+pub async fn fetch_ref_host_stats(
     pool: &PgPool,
     site: &str,
     from: NaiveDate,
     to: NaiveDate,
     limit: i64,
-) -> Result<Vec<PulseDimCount>, AnalyticsRepoError> {
-    let rows = sqlx::query_as::<_, PulseDimCount>(
+) -> Result<Vec<PulseDimStats>, AnalyticsRepoError> {
+    let rows = sqlx::query_as::<_, PulseDimStats>(
         r#"
         SELECT
-            ref_host AS value,
-            COUNT(DISTINCT user_stats_id)::bigint AS count
+            COALESCE(NULLIF(ref_host, ''), 'unknown') AS value,
+            COUNT(*)::bigint AS pv,
+            COUNT(DISTINCT user_stats_id)::bigint AS uv
         FROM pulse_events
         WHERE site = $1
           AND day BETWEEN $2 AND $3
-          AND ref_host IS NOT NULL
-          AND ref_host <> ''
-        GROUP BY ref_host
-        ORDER BY count DESC
+        GROUP BY value
+        ORDER BY pv DESC
         LIMIT $4
         "#,
     )
@@ -275,25 +278,24 @@ pub async fn fetch_ref_host_counts(
     Ok(rows)
 }
 
-pub async fn fetch_country_counts(
+pub async fn fetch_country_stats(
     pool: &PgPool,
     site: &str,
     from: NaiveDate,
     to: NaiveDate,
     limit: i64,
-) -> Result<Vec<PulseDimCount>, AnalyticsRepoError> {
-    let rows = sqlx::query_as::<_, PulseDimCount>(
+) -> Result<Vec<PulseDimStats>, AnalyticsRepoError> {
+    let rows = sqlx::query_as::<_, PulseDimStats>(
         r#"
         SELECT
-            country AS value,
-            COUNT(DISTINCT user_stats_id)::bigint AS count
+            COALESCE(NULLIF(country, ''), 'unknown') AS value,
+            COUNT(*)::bigint AS pv,
+            COUNT(DISTINCT user_stats_id)::bigint AS uv
         FROM pulse_events
         WHERE site = $1
           AND day BETWEEN $2 AND $3
-          AND country IS NOT NULL
-          AND country <> ''
-        GROUP BY country
-        ORDER BY count DESC
+        GROUP BY value
+        ORDER BY pv DESC
         LIMIT $4
         "#,
     )
@@ -370,14 +372,21 @@ pub async fn fetch_active_device_counts(
 ) -> Result<Vec<PulseDimCount>, AnalyticsRepoError> {
     let rows = sqlx::query_as::<_, PulseDimCount>(
         r#"
+        WITH per_user AS (
+            SELECT
+                user_stats_id,
+                COALESCE(NULLIF(device, ''), 'unknown') AS device,
+                ROW_NUMBER() OVER (PARTITION BY user_stats_id ORDER BY ts DESC) AS rn
+            FROM pulse_events
+            WHERE site = $1
+              AND ts BETWEEN $2 AND $3
+              AND user_stats_id IS NOT NULL
+        )
         SELECT
             device AS value,
-            COUNT(DISTINCT user_stats_id)::bigint AS count
-        FROM pulse_events
-        WHERE site = $1
-          AND ts BETWEEN $2 AND $3
-          AND device IS NOT NULL
-          AND device <> ''
+            COUNT(*)::bigint AS count
+        FROM per_user
+        WHERE rn = 1
         GROUP BY device
         ORDER BY count DESC
         LIMIT $4
@@ -401,14 +410,21 @@ pub async fn fetch_active_ua_counts(
 ) -> Result<Vec<PulseDimCount>, AnalyticsRepoError> {
     let rows = sqlx::query_as::<_, PulseDimCount>(
         r#"
+        WITH per_user AS (
+            SELECT
+                user_stats_id,
+                COALESCE(NULLIF(ua_family, ''), 'unknown') AS ua_family,
+                ROW_NUMBER() OVER (PARTITION BY user_stats_id ORDER BY ts DESC) AS rn
+            FROM pulse_events
+            WHERE site = $1
+              AND ts BETWEEN $2 AND $3
+              AND user_stats_id IS NOT NULL
+        )
         SELECT
             ua_family AS value,
-            COUNT(DISTINCT user_stats_id)::bigint AS count
-        FROM pulse_events
-        WHERE site = $1
-          AND ts BETWEEN $2 AND $3
-          AND ua_family IS NOT NULL
-          AND ua_family <> ''
+            COUNT(*)::bigint AS count
+        FROM per_user
+        WHERE rn = 1
         GROUP BY ua_family
         ORDER BY count DESC
         LIMIT $4
@@ -494,14 +510,21 @@ pub async fn fetch_active_country_counts(
 ) -> Result<Vec<PulseDimCount>, AnalyticsRepoError> {
     let rows = sqlx::query_as::<_, PulseDimCount>(
         r#"
+        WITH per_user AS (
+            SELECT
+                user_stats_id,
+                COALESCE(NULLIF(country, ''), 'unknown') AS country,
+                ROW_NUMBER() OVER (PARTITION BY user_stats_id ORDER BY ts DESC) AS rn
+            FROM pulse_events
+            WHERE site = $1
+              AND ts BETWEEN $2 AND $3
+              AND user_stats_id IS NOT NULL
+        )
         SELECT
             country AS value,
-            COUNT(DISTINCT user_stats_id)::bigint AS count
-        FROM pulse_events
-        WHERE site = $1
-          AND ts BETWEEN $2 AND $3
-          AND country IS NOT NULL
-          AND country <> ''
+            COUNT(*)::bigint AS count
+        FROM per_user
+        WHERE rn = 1
         GROUP BY country
         ORDER BY count DESC
         LIMIT $4

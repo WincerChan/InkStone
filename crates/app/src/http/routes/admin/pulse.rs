@@ -10,10 +10,9 @@ use crate::state::AppState;
 use inkstone_infra::db::{
     fetch_active_country_counts, fetch_active_device_counts, fetch_active_ref_host_counts,
     fetch_active_source_counts, fetch_active_top_paths, fetch_active_totals, fetch_active_ua_counts,
-    fetch_country_counts, fetch_daily, fetch_device_counts, fetch_ref_host_counts,
-    fetch_source_counts, fetch_totals, fetch_top_paths, fetch_ua_counts, list_sites,
-    AnalyticsRepoError, PulseDailyStat, PulseDimCount, PulseSiteOverview, PulseTopPath,
-    PulseTotals,
+    fetch_country_stats, fetch_daily, fetch_device_stats, fetch_ref_host_stats, fetch_source_stats,
+    fetch_totals, fetch_top_paths, fetch_ua_stats, list_sites, AnalyticsRepoError, PulseDailyStat,
+    PulseDimCount, PulseDimStats, PulseSiteOverview, PulseTopPath, PulseTotals,
 };
 
 const DEFAULT_RANGE_DAYS: i64 = 30;
@@ -87,11 +86,11 @@ pub struct PulseSiteStatsResponse {
     summary: PulseSummary,
     daily: Vec<PulseDailyEntry>,
     top_paths: Vec<PulseTopPathEntry>,
-    devices: Vec<PulseDimEntry>,
-    ua_families: Vec<PulseDimEntry>,
-    source_types: Vec<PulseDimEntry>,
-    ref_hosts: Vec<PulseDimEntry>,
-    countries: Vec<PulseDimEntry>,
+    devices: Vec<PulseDimStatsEntry>,
+    ua_families: Vec<PulseDimStatsEntry>,
+    source_types: Vec<PulseDimStatsEntry>,
+    ref_hosts: Vec<PulseDimStatsEntry>,
+    countries: Vec<PulseDimStatsEntry>,
 }
 
 #[derive(Debug, Serialize)]
@@ -158,6 +157,13 @@ pub struct PulseDimEntry {
     count: i64,
 }
 
+#[derive(Debug, Serialize)]
+pub struct PulseDimStatsEntry {
+    value: String,
+    pv: i64,
+    uv: i64,
+}
+
 pub async fn list_pulse_sites(
     State(state): State<AppState>,
 ) -> Result<Json<PulseSitesResponse>, PulseAdminError> {
@@ -184,11 +190,11 @@ pub async fn get_pulse_site(
             fetch_totals(&pool, &site, from, to),
             fetch_daily(&pool, &site, from, to),
             fetch_top_paths(&pool, &site, from, to, limit),
-            fetch_device_counts(&pool, &site, from, to, limit),
-            fetch_ua_counts(&pool, &site, from, to, limit),
-            fetch_source_counts(&pool, &site, from, to, limit),
-            fetch_ref_host_counts(&pool, &site, from, to, limit),
-            fetch_country_counts(&pool, &site, from, to, limit),
+            fetch_device_stats(&pool, &site, from, to, limit),
+            fetch_ua_stats(&pool, &site, from, to, limit),
+            fetch_source_stats(&pool, &site, from, to, limit),
+            fetch_ref_host_stats(&pool, &site, from, to, limit),
+            fetch_country_stats(&pool, &site, from, to, limit),
         )?;
 
     Ok(Json(PulseSiteStatsResponse {
@@ -200,11 +206,11 @@ pub async fn get_pulse_site(
         summary: map_summary(totals),
         daily: daily.into_iter().map(map_daily_entry).collect(),
         top_paths: top_paths.into_iter().map(map_top_path).collect(),
-        devices: devices.into_iter().map(map_dim_entry).collect(),
-        ua_families: ua_families.into_iter().map(map_dim_entry).collect(),
-        source_types: source_types.into_iter().map(map_dim_entry).collect(),
-        ref_hosts: ref_hosts.into_iter().map(map_dim_entry).collect(),
-        countries: countries.into_iter().map(map_dim_entry).collect(),
+        devices: devices.into_iter().map(map_dim_stats_entry).collect(),
+        ua_families: ua_families.into_iter().map(map_dim_stats_entry).collect(),
+        source_types: source_types.into_iter().map(map_dim_stats_entry).collect(),
+        ref_hosts: ref_hosts.into_iter().map(map_dim_stats_entry).collect(),
+        countries: countries.into_iter().map(map_dim_stats_entry).collect(),
     }))
 }
 
@@ -305,6 +311,14 @@ fn map_dim_entry(entry: PulseDimCount) -> PulseDimEntry {
     PulseDimEntry {
         value: entry.value,
         count: entry.count,
+    }
+}
+
+fn map_dim_stats_entry(entry: PulseDimStats) -> PulseDimStatsEntry {
+    PulseDimStatsEntry {
+        value: entry.value,
+        pv: entry.pv,
+        uv: entry.uv,
     }
 }
 
