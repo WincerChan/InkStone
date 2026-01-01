@@ -10,8 +10,8 @@ use crate::state::AppState;
 use inkstone_infra::db::{
     fetch_filter_usage, fetch_keyword_usage, fetch_search_daily, fetch_search_summary,
     fetch_sort_usage, fetch_top_categories, fetch_top_queries, fetch_top_tags, SearchDailyRow,
-    SearchDimCountRow, SearchEventsRepoError, SearchFilterUsage, SearchKeywordUsage,
-    SearchSortUsage, SearchSummaryRow, SearchTopQueryRow,
+    SearchDimCountRow, SearchEventsRepoError, SearchFilterUsage, SearchSummaryRow,
+    SearchTopQueryRow,
 };
 
 const DEFAULT_RANGE_DAYS: i64 = 30;
