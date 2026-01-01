@@ -162,7 +162,7 @@ pub async fn fetch_device_counts(
         r#"
         SELECT
             device AS value,
-            COUNT(*)::bigint AS count
+            COUNT(DISTINCT user_stats_id)::bigint AS count
         FROM pulse_events
         WHERE site = $1
           AND day BETWEEN $2 AND $3
@@ -193,7 +193,7 @@ pub async fn fetch_ua_counts(
         r#"
         SELECT
             ua_family AS value,
-            COUNT(*)::bigint AS count
+            COUNT(DISTINCT user_stats_id)::bigint AS count
         FROM pulse_events
         WHERE site = $1
           AND day BETWEEN $2 AND $3
@@ -224,7 +224,7 @@ pub async fn fetch_source_counts(
         r#"
         SELECT
             source_type AS value,
-            COUNT(*)::bigint AS count
+            COUNT(DISTINCT user_stats_id)::bigint AS count
         FROM pulse_events
         WHERE site = $1
           AND day BETWEEN $2 AND $3
@@ -255,7 +255,7 @@ pub async fn fetch_ref_host_counts(
         r#"
         SELECT
             ref_host AS value,
-            COUNT(*)::bigint AS count
+            COUNT(DISTINCT user_stats_id)::bigint AS count
         FROM pulse_events
         WHERE site = $1
           AND day BETWEEN $2 AND $3
@@ -286,7 +286,7 @@ pub async fn fetch_country_counts(
         r#"
         SELECT
             country AS value,
-            COUNT(*)::bigint AS count
+            COUNT(DISTINCT user_stats_id)::bigint AS count
         FROM pulse_events
         WHERE site = $1
           AND day BETWEEN $2 AND $3
@@ -372,7 +372,7 @@ pub async fn fetch_active_device_counts(
         r#"
         SELECT
             device AS value,
-            COUNT(*)::bigint AS count
+            COUNT(DISTINCT user_stats_id)::bigint AS count
         FROM pulse_events
         WHERE site = $1
           AND ts BETWEEN $2 AND $3
@@ -403,7 +403,7 @@ pub async fn fetch_active_ua_counts(
         r#"
         SELECT
             ua_family AS value,
-            COUNT(*)::bigint AS count
+            COUNT(DISTINCT user_stats_id)::bigint AS count
         FROM pulse_events
         WHERE site = $1
           AND ts BETWEEN $2 AND $3
@@ -496,7 +496,7 @@ pub async fn fetch_active_country_counts(
         r#"
         SELECT
             country AS value,
-            COUNT(*)::bigint AS count
+            COUNT(DISTINCT user_stats_id)::bigint AS count
         FROM pulse_events
         WHERE site = $1
           AND ts BETWEEN $2 AND $3
