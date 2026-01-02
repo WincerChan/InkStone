@@ -26,6 +26,12 @@ pub struct PulseActiveTotals {
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
+pub struct PulseActiveMinuteUv {
+    pub minute: DateTime<Utc>,
+    pub uv: i64,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct PulseDailyStat {
     pub day: NaiveDate,
     pub pv: i64,
@@ -364,6 +370,32 @@ pub async fn fetch_active_top_paths(
     .bind(from)
     .bind(to)
     .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+pub async fn fetch_active_minute_uv(
+    pool: &PgPool,
+    site: &str,
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+) -> Result<Vec<PulseActiveMinuteUv>, AnalyticsRepoError> {
+    let rows = sqlx::query_as::<_, PulseActiveMinuteUv>(
+        r#"
+        SELECT
+            date_trunc('minute', last_seen_ts) AS minute,
+            COUNT(*)::bigint AS uv
+        FROM pulse_visitors
+        WHERE site = $1
+          AND last_seen_ts BETWEEN $2 AND $3
+        GROUP BY minute
+        ORDER BY minute
+        "#,
+    )
+    .bind(site)
+    .bind(from)
+    .bind(to)
     .fetch_all(pool)
     .await?;
     Ok(rows)

@@ -8,10 +8,11 @@ use thiserror::Error;
 
 use crate::state::AppState;
 use inkstone_infra::db::{
-    fetch_active_country_counts, fetch_active_device_counts, fetch_active_ref_host_counts,
-    fetch_active_source_counts, fetch_active_top_paths, fetch_active_totals, fetch_active_ua_counts,
-    fetch_country_stats, fetch_daily, fetch_device_stats, fetch_ref_host_stats, fetch_source_stats,
-    fetch_totals, fetch_top_paths, fetch_ua_stats, list_sites, AnalyticsRepoError, PulseDailyStat,
+    fetch_active_country_counts, fetch_active_device_counts, fetch_active_minute_uv,
+    fetch_active_ref_host_counts, fetch_active_source_counts, fetch_active_top_paths,
+    fetch_active_totals, fetch_active_ua_counts, fetch_country_stats, fetch_daily,
+    fetch_device_stats, fetch_ref_host_stats, fetch_source_stats, fetch_totals, fetch_top_paths,
+    fetch_ua_stats, list_sites, AnalyticsRepoError, PulseActiveMinuteUv, PulseDailyStat,
     PulseDimCount, PulseDimStats, PulseSiteOverview, PulseTopPath, PulseTotals,
 };
 
@@ -99,6 +100,7 @@ pub struct PulseActiveResponse {
     range: PulseActiveRange,
     active_pv: i64,
     active_uv: i64,
+    minutes: Vec<PulseActiveMinuteEntry>,
     top_paths: Vec<PulseTopPathEntry>,
     devices: Vec<PulseDimEntry>,
     ua_families: Vec<PulseDimEntry>,
@@ -153,6 +155,12 @@ pub struct PulseTopPathEntry {
 #[derive(Debug, Serialize)]
 pub struct PulseDimEntry {
     value: String,
+    uv: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PulseActiveMinuteEntry {
+    minute: String,
     uv: i64,
 }
 
@@ -222,9 +230,10 @@ pub async fn get_pulse_active(
     let limit = clamp_limit(query.limit);
     let pool = state.db.as_ref().ok_or(PulseAdminError::DbUnavailable)?.clone();
     let (from, to) = active_range(minutes);
-    let (totals, top_paths, devices, ua_families, source_types, ref_hosts, countries) =
+    let (totals, minutes, top_paths, devices, ua_families, source_types, ref_hosts, countries) =
         tokio::try_join!(
             fetch_active_totals(&pool, &site, from, to),
+            fetch_active_minute_uv(&pool, &site, from, to),
             fetch_active_top_paths(&pool, &site, from, to, limit),
             fetch_active_device_counts(&pool, &site, from, to, limit),
             fetch_active_ua_counts(&pool, &site, from, to, limit),
@@ -241,6 +250,7 @@ pub async fn get_pulse_active(
         },
         active_pv: totals.pv,
         active_uv: totals.uv,
+        minutes: minutes.into_iter().map(map_active_minute).collect(),
         top_paths: top_paths.into_iter().map(map_top_path).collect(),
         devices: devices.into_iter().map(map_dim_entry).collect(),
         ua_families: ua_families.into_iter().map(map_dim_entry).collect(),
@@ -316,6 +326,13 @@ fn map_dim_stats_entry(entry: PulseDimStats) -> PulseDimStatsEntry {
     PulseDimStatsEntry {
         value: entry.value,
         pv: entry.pv,
+        uv: entry.uv,
+    }
+}
+
+fn map_active_minute(entry: PulseActiveMinuteUv) -> PulseActiveMinuteEntry {
+    PulseActiveMinuteEntry {
+        minute: entry.minute.to_rfc3339(),
         uv: entry.uv,
     }
 }
