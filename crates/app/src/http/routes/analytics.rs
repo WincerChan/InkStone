@@ -140,8 +140,25 @@ pub async fn post_engage(
     }
     let pool = state.db.as_ref().ok_or(PulseApiError::DbUnavailable)?;
     let now = Utc::now();
-    upsert_engagement(pool, page_instance_id, duration_ms).await?;
-    touch_visitor_last_seen(pool, &site, ids.stats_id.as_slice(), now).await?;
+    if let Err(err) = upsert_engagement(pool, page_instance_id, duration_ms).await {
+        tracing::warn!(
+            error = %err,
+            page_instance_id = %page_instance_id,
+            site = %site,
+            duration_ms,
+            "pulse engage upsert failed"
+        );
+        return Err(PulseApiError::Db(err));
+    }
+    if let Err(err) = touch_visitor_last_seen(pool, &site, ids.stats_id.as_slice(), now).await {
+        tracing::warn!(
+            error = %err,
+            page_instance_id = %page_instance_id,
+            site = %site,
+            "pulse engage visitor update failed"
+        );
+        return Err(PulseApiError::Db(err));
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

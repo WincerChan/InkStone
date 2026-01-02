@@ -162,10 +162,9 @@ pub async fn upsert_engagement(
 ) -> Result<(), AnalyticsRepoError> {
     sqlx::query(
         r#"
-        INSERT INTO pulse_events (page_instance_id, duration_ms)
-        VALUES ($1, $2)
-        ON CONFLICT (page_instance_id) DO UPDATE SET
-            duration_ms = EXCLUDED.duration_ms
+        UPDATE pulse_events
+        SET duration_ms = $2
+        WHERE page_instance_id = $1
         "#,
     )
     .bind(page_instance_id)
