@@ -91,6 +91,9 @@ pub async fn upsert_visitor(
     last_seen_ts: DateTime<Utc>,
     entry_source_type: Option<&str>,
     entry_ref_host: Option<&str>,
+    last_device: Option<&str>,
+    last_ua_family: Option<&str>,
+    last_country: Option<&str>,
 ) -> Result<VisitorSession, AnalyticsRepoError> {
     let session = sqlx::query_as::<_, VisitorSession>(
         r#"
@@ -101,9 +104,12 @@ pub async fn upsert_visitor(
             last_seen_ts,
             session_start_ts,
             entry_source_type,
-            entry_ref_host
+            entry_ref_host,
+            last_device,
+            last_ua_family,
+            last_country
         )
-        VALUES ($1, $2, $3, $3, $3, $4, $5)
+        VALUES ($1, $2, $3, $3, $3, $4, $5, $6, $7, $8)
         ON CONFLICT (site, user_stats_id) DO UPDATE SET
             last_seen_ts = EXCLUDED.last_seen_ts,
             session_start_ts = CASE
@@ -120,7 +126,10 @@ pub async fn upsert_visitor(
                 WHEN pulse_visitors.last_seen_ts < EXCLUDED.last_seen_ts - INTERVAL '30 minutes'
                     THEN EXCLUDED.entry_ref_host
                 ELSE pulse_visitors.entry_ref_host
-            END
+            END,
+            last_device = COALESCE(EXCLUDED.last_device, pulse_visitors.last_device),
+            last_ua_family = COALESCE(EXCLUDED.last_ua_family, pulse_visitors.last_ua_family),
+            last_country = COALESCE(EXCLUDED.last_country, pulse_visitors.last_country)
         RETURNING session_start_ts, entry_source_type, entry_ref_host
         "#,
     )
@@ -129,6 +138,9 @@ pub async fn upsert_visitor(
     .bind(last_seen_ts)
     .bind(entry_source_type)
     .bind(entry_ref_host)
+    .bind(last_device)
+    .bind(last_ua_family)
+    .bind(last_country)
     .fetch_one(pool)
     .await?;
     Ok(session)

@@ -111,7 +111,6 @@ pub struct PulseActiveResponse {
 pub struct PulseActiveSummaryResponse {
     site: String,
     range: PulseActiveRange,
-    active_pv: i64,
     active_uv: i64,
 }
 
@@ -267,7 +266,6 @@ pub async fn get_pulse_active_summary(
             from: from.to_rfc3339(),
             to: to.to_rfc3339(),
         },
-        active_pv: totals.pv,
         active_uv: totals.uv,
     }))
 }

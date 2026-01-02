@@ -317,10 +317,16 @@ pub async fn fetch_active_totals(
     let row = sqlx::query_as::<_, PulseActiveTotals>(
         r#"
         SELECT
-            COUNT(*)::bigint AS pv,
-            COUNT(*)::bigint AS uv
-        FROM pulse_visitors
-        WHERE site = $1 AND last_seen_ts BETWEEN $2 AND $3
+            (
+                SELECT COUNT(*)::bigint
+                FROM pulse_events
+                WHERE site = $1 AND ts BETWEEN $2 AND $3
+            ) AS pv,
+            (
+                SELECT COUNT(*)::bigint
+                FROM pulse_visitors
+                WHERE site = $1 AND last_seen_ts BETWEEN $2 AND $3
+            ) AS uv
         "#,
     )
     .bind(site)
@@ -372,22 +378,13 @@ pub async fn fetch_active_device_counts(
 ) -> Result<Vec<PulseDimCount>, AnalyticsRepoError> {
     let rows = sqlx::query_as::<_, PulseDimCount>(
         r#"
-        WITH per_user AS (
-            SELECT
-                user_stats_id,
-                COALESCE(NULLIF(device, ''), 'unknown') AS device,
-                ROW_NUMBER() OVER (PARTITION BY user_stats_id ORDER BY ts DESC) AS rn
-            FROM pulse_events
-            WHERE site = $1
-              AND ts BETWEEN $2 AND $3
-              AND user_stats_id IS NOT NULL
-        )
         SELECT
-            device AS value,
+            COALESCE(NULLIF(last_device, ''), 'unknown') AS value,
             COUNT(*)::bigint AS count
-        FROM per_user
-        WHERE rn = 1
-        GROUP BY device
+        FROM pulse_visitors
+        WHERE site = $1
+          AND last_seen_ts BETWEEN $2 AND $3
+        GROUP BY value
         ORDER BY count DESC
         LIMIT $4
         "#,
@@ -410,22 +407,13 @@ pub async fn fetch_active_ua_counts(
 ) -> Result<Vec<PulseDimCount>, AnalyticsRepoError> {
     let rows = sqlx::query_as::<_, PulseDimCount>(
         r#"
-        WITH per_user AS (
-            SELECT
-                user_stats_id,
-                COALESCE(NULLIF(ua_family, ''), 'unknown') AS ua_family,
-                ROW_NUMBER() OVER (PARTITION BY user_stats_id ORDER BY ts DESC) AS rn
-            FROM pulse_events
-            WHERE site = $1
-              AND ts BETWEEN $2 AND $3
-              AND user_stats_id IS NOT NULL
-        )
         SELECT
-            ua_family AS value,
+            COALESCE(NULLIF(last_ua_family, ''), 'unknown') AS value,
             COUNT(*)::bigint AS count
-        FROM per_user
-        WHERE rn = 1
-        GROUP BY ua_family
+        FROM pulse_visitors
+        WHERE site = $1
+          AND last_seen_ts BETWEEN $2 AND $3
+        GROUP BY value
         ORDER BY count DESC
         LIMIT $4
         "#,
@@ -510,22 +498,13 @@ pub async fn fetch_active_country_counts(
 ) -> Result<Vec<PulseDimCount>, AnalyticsRepoError> {
     let rows = sqlx::query_as::<_, PulseDimCount>(
         r#"
-        WITH per_user AS (
-            SELECT
-                user_stats_id,
-                COALESCE(NULLIF(country, ''), 'unknown') AS country,
-                ROW_NUMBER() OVER (PARTITION BY user_stats_id ORDER BY ts DESC) AS rn
-            FROM pulse_events
-            WHERE site = $1
-              AND ts BETWEEN $2 AND $3
-              AND user_stats_id IS NOT NULL
-        )
         SELECT
-            country AS value,
+            COALESCE(NULLIF(last_country, ''), 'unknown') AS value,
             COUNT(*)::bigint AS count
-        FROM per_user
-        WHERE rn = 1
-        GROUP BY country
+        FROM pulse_visitors
+        WHERE site = $1
+          AND last_seen_ts BETWEEN $2 AND $3
+        GROUP BY value
         ORDER BY count DESC
         LIMIT $4
         "#,

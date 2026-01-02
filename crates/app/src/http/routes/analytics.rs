@@ -102,6 +102,9 @@ pub async fn post_pv(
         now,
         entry_source_type.as_deref(),
         entry_ref_host.as_deref(),
+        device.as_deref(),
+        ua_family.as_deref(),
+        country.as_deref(),
     )
     .await?;
     let record = PageViewRecord {
