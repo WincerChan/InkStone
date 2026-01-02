@@ -140,25 +140,8 @@ pub async fn post_engage(
     }
     let pool = state.db.as_ref().ok_or(PulseApiError::DbUnavailable)?;
     let now = Utc::now();
-    if let Err(err) = upsert_engagement(pool, page_instance_id, duration_ms).await {
-        tracing::warn!(
-            error = %err,
-            page_instance_id = %page_instance_id,
-            site = %site,
-            duration_ms,
-            "pulse engage upsert failed"
-        );
-        return Err(PulseApiError::Db(err));
-    }
-    if let Err(err) = touch_visitor_last_seen(pool, &site, ids.stats_id.as_slice(), now).await {
-        tracing::warn!(
-            error = %err,
-            page_instance_id = %page_instance_id,
-            site = %site,
-            "pulse engage visitor update failed"
-        );
-        return Err(PulseApiError::Db(err));
-    }
+    upsert_engagement(pool, page_instance_id, duration_ms).await?;
+    touch_visitor_last_seen(pool, &site, ids.stats_id.as_slice(), now).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -362,6 +345,7 @@ fn extract_country(headers: &HeaderMap) -> Option<String> {
 
 impl IntoResponse for PulseApiError {
     fn into_response(self) -> axum::response::Response {
+        tracing::warn!(error = %self, "pulse api error");
         let (status, message) = match &self {
             PulseApiError::MissingPageInstanceId
             | PulseApiError::InvalidPageInstanceId

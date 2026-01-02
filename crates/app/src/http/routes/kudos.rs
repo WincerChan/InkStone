@@ -4,6 +4,7 @@ use axum::response::IntoResponse;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tracing::warn;
 
 use crate::http::middleware::bid_cookie::ClientIds;
 use crate::state::AppState;
@@ -106,6 +107,7 @@ fn ensure_db_configured(state: &AppState) -> Result<(), KudosApiError> {
 
 impl IntoResponse for KudosApiError {
     fn into_response(self) -> axum::response::Response {
+        warn!(error = %self, "kudos api error");
         let (status, message) = match &self {
             KudosApiError::MissingPath => (StatusCode::BAD_REQUEST, self.to_string()),
             KudosApiError::InvalidPath => (StatusCode::BAD_REQUEST, self.to_string()),

@@ -5,6 +5,7 @@ use axum::Json;
 use chrono::{Datelike, NaiveDate};
 use serde::Serialize;
 use thiserror::Error;
+use tracing::warn;
 
 use crate::state::AppState;
 use inkstone_infra::db::{fetch_douban_marks_by_range, DoubanMarkRecord, DoubanRepoError};
@@ -88,6 +89,7 @@ fn build_douban_url(item_type: &str, id: &str) -> Result<String, DoubanApiError>
 
 impl IntoResponse for DoubanApiError {
     fn into_response(self) -> axum::response::Response {
+        warn!(error = %self, "douban api error");
         let (status, message) = match &self {
             DoubanApiError::DbUnavailable => (StatusCode::SERVICE_UNAVAILABLE, self.to_string()),
             DoubanApiError::Db(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),

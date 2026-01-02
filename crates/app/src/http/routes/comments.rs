@@ -6,6 +6,7 @@ use axum::response::IntoResponse;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tracing::warn;
 
 use crate::state::AppState;
 use inkstone_core::domain::comments::{Comment, CommentThread};
@@ -137,6 +138,7 @@ struct CommentNode {
 
 impl IntoResponse for CommentsApiError {
     fn into_response(self) -> axum::response::Response {
+        warn!(error = %self, "comments api error");
         let status = match self {
             CommentsApiError::MissingPostId | CommentsApiError::InvalidPostId => {
                 StatusCode::BAD_REQUEST
