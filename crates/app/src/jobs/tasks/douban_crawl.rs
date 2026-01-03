@@ -456,20 +456,20 @@ async fn sync_page(
 
     if rebuild {
         let affected = upsert_douban_items(pool, &records).await?;
-        info!(category = category.label(), affected, "douban items upserted");
+        debug!(category = category.label(), affected, "douban items upserted");
         return Ok(false);
     }
 
     let total = records.len();
     let inserted = insert_douban_items(pool, &records).await?;
-    info!(
+    debug!(
         category = category.label(),
         inserted,
         "douban items inserted"
     );
     let stop = should_stop_on_existing(inserted, total);
     if stop {
-        info!(
+        debug!(
             category = category.label(),
             "douban pagination stopped after existing item"
         );
@@ -538,7 +538,7 @@ fn join_url(base_url: &str, href: &str) -> String {
 
 fn log_items(category: DoubanCategory, items: &[DoubanItem]) {
     let label = category.label();
-    info!(category = label, total = items.len(), "douban crawl parsed");
+    debug!(category = label, total = items.len(), "douban crawl parsed");
     for item in items.iter().take(ITEM_LOG_LIMIT) {
         match serde_json::to_string(item) {
             Ok(json) => debug!(category = label, item = %json, "douban item"),
