@@ -1,4 +1,4 @@
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
 use sqlx::{PgPool, QueryBuilder, Row};
 use thiserror::Error;
 
@@ -27,6 +27,16 @@ pub struct DoubanMarkRecord {
 pub struct DoubanTypeCount {
     pub item_type: String,
     pub count: i64,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct DoubanRecentItem {
+    pub id: String,
+    pub item_type: String,
+    pub title: String,
+    pub poster: Option<String>,
+    pub date: Option<NaiveDate>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone)]
@@ -76,7 +86,8 @@ pub async fn upsert_douban_items(
             rating = EXCLUDED.rating,
             tags = EXCLUDED.tags,
             comment = EXCLUDED.comment,
-            date = EXCLUDED.date
+            date = EXCLUDED.date,
+            updated_at = NOW()
         "#,
     );
 
@@ -149,6 +160,49 @@ pub async fn fetch_douban_marks_by_range(
         });
     }
     Ok(items)
+}
+
+pub async fn count_recent_douban_items(
+    pool: &PgPool,
+    since: DateTime<Utc>,
+) -> Result<i64, DoubanRepoError> {
+    let total: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)
+        FROM douban_items
+        WHERE updated_at >= $1
+        "#,
+    )
+    .bind(since)
+    .fetch_one(pool)
+    .await?;
+    Ok(total)
+}
+
+pub async fn fetch_recent_douban_items(
+    pool: &PgPool,
+    since: DateTime<Utc>,
+    limit: i64,
+) -> Result<Vec<DoubanRecentItem>, DoubanRepoError> {
+    let rows = sqlx::query_as::<_, DoubanRecentItem>(
+        r#"
+        SELECT id,
+               "type" AS item_type,
+               title,
+               poster,
+               date,
+               updated_at
+        FROM douban_items
+        WHERE updated_at >= $1
+        ORDER BY updated_at DESC, "type" ASC, id ASC
+        LIMIT $2
+        "#,
+    )
+    .bind(since)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
 }
 
 pub async fn fetch_douban_overview(pool: &PgPool) -> Result<DoubanOverview, DoubanRepoError> {

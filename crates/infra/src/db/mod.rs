@@ -13,17 +13,20 @@ pub use analytics_repo::{
     AnalyticsRepoError, PageViewRecord, VisitorSession,
 };
 pub use comments_repo::{
-    fetch_comments_overview, find_discussion_by_discussion_id, find_discussion_by_post_id,
-    list_comments, list_discussions, replace_comments, upsert_discussion, CommentRecord,
-    CommentsOverview, CommentsRepoError, DiscussionRecord,
+    count_recent_comments, fetch_comments_overview, fetch_recent_comments,
+    find_discussion_by_discussion_id, find_discussion_by_post_id, list_comments, list_discussions,
+    replace_comments, upsert_discussion, CommentRecord, CommentsOverview, CommentsRepoError,
+    DiscussionRecord, RecentCommentRecord,
 };
 pub use douban_repo::{
-    fetch_douban_marks_by_range, fetch_douban_overview, insert_douban_items, upsert_douban_items,
-    DoubanItemRecord, DoubanMarkRecord, DoubanOverview, DoubanRepoError, DoubanTypeCount,
+    count_recent_douban_items, fetch_douban_marks_by_range, fetch_douban_overview,
+    fetch_recent_douban_items, insert_douban_items, upsert_douban_items, DoubanItemRecord,
+    DoubanMarkRecord, DoubanOverview, DoubanRecentItem, DoubanRepoError, DoubanTypeCount,
 };
 pub use kudos_repo::{
-    count_kudos, fetch_kudos_overview, fetch_kudos_top_paths, has_kudos, insert_kudos,
-    load_all_kudos, KudosEntry, KudosOverview, KudosPathCount, KudosRepoError,
+    count_kudos, count_recent_kudos, fetch_kudos_overview, fetch_kudos_top_paths,
+    fetch_recent_kudos_paths, has_kudos, insert_kudos, load_all_kudos, KudosEntry, KudosOverview,
+    KudosPathCount, KudosRecentPath, KudosRepoError,
 };
 pub use pulse_admin_repo::{
     fetch_active_country_counts, fetch_active_device_counts, fetch_active_minute_uv,

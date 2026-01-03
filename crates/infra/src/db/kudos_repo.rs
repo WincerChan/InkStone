@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Row};
 use thiserror::Error;
 
@@ -23,6 +24,13 @@ pub struct KudosOverview {
 pub struct KudosPathCount {
     pub path: String,
     pub count: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct KudosRecentPath {
+    pub path: String,
+    pub count: i64,
+    pub last_at: DateTime<Utc>,
 }
 
 pub async fn insert_kudos(
@@ -131,6 +139,55 @@ pub async fn fetch_kudos_top_paths(
         items.push(KudosPathCount {
             path: row.try_get("path")?,
             count: row.try_get("count")?,
+        });
+    }
+    Ok(items)
+}
+
+pub async fn count_recent_kudos(
+    pool: &PgPool,
+    since: DateTime<Utc>,
+) -> Result<i64, KudosRepoError> {
+    let total: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)
+        FROM kudos
+        WHERE created_at >= $1
+        "#,
+    )
+    .bind(since)
+    .fetch_one(pool)
+    .await?;
+    Ok(total)
+}
+
+pub async fn fetch_recent_kudos_paths(
+    pool: &PgPool,
+    since: DateTime<Utc>,
+    limit: i64,
+) -> Result<Vec<KudosRecentPath>, KudosRepoError> {
+    let rows = sqlx::query(
+        r#"
+        SELECT path,
+               COUNT(*) AS count,
+               MAX(created_at) AS last_at
+        FROM kudos
+        WHERE created_at >= $1
+        GROUP BY path
+        ORDER BY last_at DESC, path ASC
+        LIMIT $2
+        "#,
+    )
+    .bind(since)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    let mut items = Vec::with_capacity(rows.len());
+    for row in rows {
+        items.push(KudosRecentPath {
+            path: row.try_get("path")?,
+            count: row.try_get("count")?,
+            last_at: row.try_get("last_at")?,
         });
     }
     Ok(items)

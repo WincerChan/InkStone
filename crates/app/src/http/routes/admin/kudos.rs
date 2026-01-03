@@ -2,19 +2,28 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
+use chrono::{Duration, Utc};
 use serde::Serialize;
 use thiserror::Error;
 
 use crate::jobs::tasks::kudos_cache;
 use crate::jobs::JobError;
 use crate::state::AppState;
-use inkstone_infra::db::{fetch_kudos_overview, fetch_kudos_top_paths, KudosRepoError};
+use inkstone_infra::db::{
+    count_recent_kudos, fetch_kudos_overview, fetch_kudos_top_paths, fetch_recent_kudos_paths,
+    KudosRecentPath, KudosRepoError,
+};
 
 const DEFAULT_TOP_LIMIT: i64 = 20;
 const MAX_TOP_LIMIT: i64 = 200;
 
 #[derive(Debug, serde::Deserialize)]
 pub struct KudosTopQuery {
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct KudosStatusQuery {
     pub limit: Option<i64>,
 }
 
@@ -37,6 +46,7 @@ struct ErrorBody {
 pub struct KudosStatusResponse {
     cache: KudosCacheStatus,
     database: KudosDbStatus,
+    recent_24h: KudosRecentSummary,
 }
 
 #[derive(Debug, Serialize)]
@@ -60,6 +70,19 @@ pub struct KudosDbStatus {
 }
 
 #[derive(Debug, Serialize)]
+pub struct KudosRecentSummary {
+    total: i64,
+    items: Vec<KudosRecentEntry>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct KudosRecentEntry {
+    path: String,
+    count: i64,
+    last_at: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct KudosTopPathsResponse {
     total: usize,
     items: Vec<KudosTopPathEntry>,
@@ -73,9 +96,23 @@ pub struct KudosTopPathEntry {
 
 pub async fn get_kudos_status(
     State(state): State<AppState>,
+    Query(query): Query<KudosStatusQuery>,
 ) -> Result<Json<KudosStatusResponse>, KudosAdminError> {
+    let limit = clamp_limit(query.limit);
     let (cache, database) = load_status(&state).await?;
-    Ok(Json(KudosStatusResponse { cache, database }))
+    let pool = state.db.as_ref().ok_or(KudosAdminError::DbUnavailable)?;
+    let since = Utc::now() - Duration::hours(24);
+    let total = count_recent_kudos(pool, since).await?;
+    let items = fetch_recent_kudos_paths(pool, since, limit).await?;
+    let recent_24h = KudosRecentSummary {
+        total,
+        items: items.into_iter().map(map_recent_entry).collect(),
+    };
+    Ok(Json(KudosStatusResponse {
+        cache,
+        database,
+        recent_24h,
+    }))
 }
 
 pub async fn post_kudos_flush(
@@ -149,6 +186,14 @@ fn clamp_limit(limit: Option<i64>) -> i64 {
     match limit {
         Some(value) if value > 0 => value.min(MAX_TOP_LIMIT),
         _ => DEFAULT_TOP_LIMIT,
+    }
+}
+
+fn map_recent_entry(entry: KudosRecentPath) -> KudosRecentEntry {
+    KudosRecentEntry {
+        path: entry.path,
+        count: entry.count,
+        last_at: entry.last_at.to_rfc3339(),
     }
 }
 

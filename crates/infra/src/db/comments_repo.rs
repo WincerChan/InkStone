@@ -41,6 +41,17 @@ pub struct CommentsOverview {
     pub last_updated_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct RecentCommentRecord {
+    pub post_id: String,
+    pub comment_id: String,
+    pub comment_url: String,
+    pub source: String,
+    pub author_login: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
 pub async fn upsert_discussion(
     pool: &PgPool,
     record: &DiscussionRecord,
@@ -202,6 +213,64 @@ pub async fn fetch_comments_overview(
         comments,
         last_updated_at,
     })
+}
+
+pub async fn count_recent_comments(
+    pool: &PgPool,
+    since: DateTime<Utc>,
+) -> Result<i64, CommentsRepoError> {
+    let total: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)
+        FROM comment_items
+        WHERE updated_at >= $1
+        "#,
+    )
+    .bind(since)
+    .fetch_one(pool)
+    .await?;
+    Ok(total)
+}
+
+pub async fn fetch_recent_comments(
+    pool: &PgPool,
+    since: DateTime<Utc>,
+    limit: i64,
+) -> Result<Vec<RecentCommentRecord>, CommentsRepoError> {
+    let rows = sqlx::query(
+        r#"
+        SELECT d.post_id,
+               i.comment_id,
+               i.comment_url,
+               i.source,
+               i.author_login,
+               i.created_at,
+               i.updated_at
+        FROM comment_items i
+        JOIN comment_discussions d
+          ON d.discussion_id = i.discussion_id
+        WHERE i.updated_at >= $1
+        ORDER BY i.updated_at DESC
+        LIMIT $2
+        "#,
+    )
+    .bind(since)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    let mut items = Vec::with_capacity(rows.len());
+    for row in rows {
+        items.push(RecentCommentRecord {
+            post_id: row.try_get("post_id")?,
+            comment_id: row.try_get("comment_id")?,
+            comment_url: row.try_get("comment_url")?,
+            source: row.try_get("source")?,
+            author_login: row.try_get("author_login")?,
+            created_at: row.try_get("created_at")?,
+            updated_at: row.try_get("updated_at")?,
+        });
+    }
+    Ok(items)
 }
 
 async fn delete_comments(

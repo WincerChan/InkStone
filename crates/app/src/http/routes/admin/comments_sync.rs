@@ -1,14 +1,26 @@
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
+use chrono::{Duration, Utc};
 use serde::Serialize;
 use thiserror::Error;
 
 use crate::jobs::tasks::comments_sync;
 use crate::jobs::JobError;
 use crate::state::AppState;
-use inkstone_infra::db::{fetch_comments_overview, CommentsRepoError};
+use inkstone_infra::db::{
+    count_recent_comments, fetch_comments_overview, fetch_recent_comments, CommentsRepoError,
+    RecentCommentRecord,
+};
+
+const DEFAULT_RECENT_LIMIT: i64 = 20;
+const MAX_RECENT_LIMIT: i64 = 200;
+
+#[derive(Debug, serde::Deserialize)]
+pub struct CommentsStatusQuery {
+    pub limit: Option<i64>,
+}
 
 #[derive(Debug, Error)]
 pub enum CommentsAdminError {
@@ -47,6 +59,24 @@ pub struct CommentsStatusResponse {
     discussions: i64,
     comments: i64,
     last_updated_at: Option<String>,
+    recent_24h: CommentsRecentSummary,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CommentsRecentSummary {
+    total: i64,
+    items: Vec<CommentsRecentEntry>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CommentsRecentEntry {
+    post_id: String,
+    comment_id: String,
+    comment_url: String,
+    source: String,
+    author_login: Option<String>,
+    created_at: String,
+    updated_at: String,
 }
 
 pub async fn post_comments_sync(
@@ -73,14 +103,24 @@ pub async fn post_comments_rebuild(
 
 pub async fn get_comments_status(
     State(state): State<AppState>,
+    Query(query): Query<CommentsStatusQuery>,
 ) -> Result<Json<CommentsStatusResponse>, CommentsAdminError> {
     let pool = state.db.as_ref().ok_or(CommentsAdminError::DbUnavailable)?;
     let overview = fetch_comments_overview(pool).await?;
+    let limit = clamp_limit(query.limit);
+    let since = Utc::now() - Duration::hours(24);
+    let total = count_recent_comments(pool, since).await?;
+    let items = fetch_recent_comments(pool, since, limit).await?;
+    let recent_24h = CommentsRecentSummary {
+        total,
+        items: items.into_iter().map(map_recent_entry).collect(),
+    };
     Ok(Json(CommentsStatusResponse {
         enabled: comments_sync::is_enabled(&state.config),
         discussions: overview.discussions,
         comments: overview.comments,
         last_updated_at: format_timestamp(overview.last_updated_at),
+        recent_24h,
     }))
 }
 
@@ -120,6 +160,25 @@ fn map_stats(stats: comments_sync::CommentsSyncStats) -> CommentsSyncStatsRespon
 
 fn format_timestamp(value: Option<chrono::DateTime<chrono::Utc>>) -> Option<String> {
     value.map(|timestamp| timestamp.to_rfc3339())
+}
+
+fn clamp_limit(limit: Option<i64>) -> i64 {
+    match limit {
+        Some(value) if value > 0 => value.min(MAX_RECENT_LIMIT),
+        _ => DEFAULT_RECENT_LIMIT,
+    }
+}
+
+fn map_recent_entry(entry: RecentCommentRecord) -> CommentsRecentEntry {
+    CommentsRecentEntry {
+        post_id: entry.post_id,
+        comment_id: entry.comment_id,
+        comment_url: entry.comment_url,
+        source: entry.source,
+        author_login: entry.author_login,
+        created_at: entry.created_at.to_rfc3339(),
+        updated_at: entry.updated_at.to_rfc3339(),
+    }
 }
 
 #[cfg(test)]

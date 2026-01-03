@@ -2,19 +2,30 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
-use chrono::NaiveDate;
+use chrono::{Duration, NaiveDate, Utc};
 use serde::Serialize;
 use thiserror::Error;
 
 use crate::jobs::tasks::douban_crawl::{self, DoubanCategory};
 use crate::jobs::JobError;
 use crate::state::AppState;
-use inkstone_infra::db::{fetch_douban_overview, DoubanRepoError};
+use inkstone_infra::db::{
+    count_recent_douban_items, fetch_douban_overview, fetch_recent_douban_items, DoubanRecentItem,
+    DoubanRepoError,
+};
+
+const DEFAULT_RECENT_LIMIT: i64 = 20;
+const MAX_RECENT_LIMIT: i64 = 200;
 
 #[derive(Debug, serde::Deserialize)]
 pub struct DoubanAdminQuery {
     #[serde(rename = "type")]
     pub item_type: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct DoubanStatusQuery {
+    pub limit: Option<i64>,
 }
 
 #[derive(Debug, Error)]
@@ -49,6 +60,7 @@ pub struct DoubanOverviewResponse {
     with_date: i64,
     last_date: Option<String>,
     types: Vec<DoubanTypeEntry>,
+    recent_24h: DoubanRecentSummary,
 }
 
 #[derive(Debug, Serialize)]
@@ -56,6 +68,23 @@ pub struct DoubanTypeEntry {
     #[serde(rename = "type")]
     item_type: String,
     count: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DoubanRecentSummary {
+    total: i64,
+    items: Vec<DoubanRecentEntry>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DoubanRecentEntry {
+    #[serde(rename = "type")]
+    item_type: String,
+    id: String,
+    title: String,
+    date: Option<String>,
+    updated_at: String,
+    url: String,
 }
 
 pub async fn post_douban_refresh(
@@ -67,7 +96,7 @@ pub async fn post_douban_refresh(
         Some(category) => douban_crawl::run_for_category(&state, false, category).await?,
         None => douban_crawl::run(&state, false).await?,
     }
-    let overview = load_overview(&state).await?;
+    let overview = load_overview(&state, None).await?;
     Ok(Json(DoubanActionResponse {
         action: "refresh",
         overview,
@@ -83,7 +112,7 @@ pub async fn post_douban_rebuild(
         Some(category) => douban_crawl::run_for_category(&state, true, category).await?,
         None => douban_crawl::run(&state, true).await?,
     }
-    let overview = load_overview(&state).await?;
+    let overview = load_overview(&state, None).await?;
     Ok(Json(DoubanActionResponse {
         action: "rebuild",
         overview,
@@ -92,10 +121,10 @@ pub async fn post_douban_rebuild(
 
 pub async fn get_douban_status(
     State(state): State<AppState>,
+    Query(query): Query<DoubanStatusQuery>,
 ) -> Result<Json<DoubanOverviewResponse>, DoubanAdminError> {
-    let pool = state.db.as_ref().ok_or(DoubanAdminError::DbUnavailable)?;
-    let overview = fetch_douban_overview(pool).await?;
-    Ok(Json(map_overview(&state, overview)))
+    let overview = load_overview(&state, query.limit).await?;
+    Ok(Json(overview))
 }
 
 impl IntoResponse for DoubanAdminError {
@@ -144,15 +173,24 @@ fn parse_category(value: Option<&str>) -> Result<Option<DoubanCategory>, DoubanA
     }
 }
 
-async fn load_overview(state: &AppState) -> Result<DoubanOverviewResponse, DoubanAdminError> {
+async fn load_overview(
+    state: &AppState,
+    limit: Option<i64>,
+) -> Result<DoubanOverviewResponse, DoubanAdminError> {
     let pool = state.db.as_ref().ok_or(DoubanAdminError::DbUnavailable)?;
     let overview = fetch_douban_overview(pool).await?;
-    Ok(map_overview(state, overview))
+    let limit = clamp_limit(limit);
+    let since = Utc::now() - Duration::hours(24);
+    let total = count_recent_douban_items(pool, since).await?;
+    let items = fetch_recent_douban_items(pool, since, limit).await?;
+    Ok(map_overview(state, overview, total, items))
 }
 
 fn map_overview(
     state: &AppState,
     overview: inkstone_infra::db::DoubanOverview,
+    recent_total: i64,
+    recent_items: Vec<DoubanRecentItem>,
 ) -> DoubanOverviewResponse {
     DoubanOverviewResponse {
         enabled: is_douban_uid_configured(&state.config.douban_uid),
@@ -167,11 +205,46 @@ fn map_overview(
                 count: entry.count,
             })
             .collect(),
+        recent_24h: DoubanRecentSummary {
+            total: recent_total,
+            items: recent_items
+                .into_iter()
+                .map(|item| map_recent_entry(item))
+                .collect(),
+        },
     }
 }
 
 fn format_date(value: Option<NaiveDate>) -> Option<String> {
     value.map(|date| date.to_string())
+}
+
+fn map_recent_entry(item: DoubanRecentItem) -> DoubanRecentEntry {
+    let url = build_douban_url(&item.item_type, &item.id);
+    DoubanRecentEntry {
+        item_type: item.item_type,
+        id: item.id,
+        title: item.title,
+        date: item.date.map(|value| value.to_string()),
+        updated_at: item.updated_at.to_rfc3339(),
+        url,
+    }
+}
+
+fn build_douban_url(item_type: &str, id: &str) -> String {
+    match item_type {
+        "movie" => format!("https://movie.douban.com/subject/{}/", id),
+        "book" => format!("https://book.douban.com/subject/{}/", id),
+        "game" => format!("https://www.douban.com/game/{}/", id),
+        other => format!("https://www.douban.com/{}/{}", other, id),
+    }
+}
+
+fn clamp_limit(limit: Option<i64>) -> i64 {
+    match limit {
+        Some(value) if value > 0 => value.min(MAX_RECENT_LIMIT),
+        _ => DEFAULT_RECENT_LIMIT,
+    }
 }
 
 #[cfg(test)]
