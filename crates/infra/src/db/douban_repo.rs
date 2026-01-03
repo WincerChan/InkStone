@@ -1,4 +1,4 @@
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::NaiveDate;
 use sqlx::{PgPool, QueryBuilder, Row};
 use thiserror::Error;
 
@@ -36,7 +36,6 @@ pub struct DoubanRecentItem {
     pub title: String,
     pub poster: Option<String>,
     pub date: Option<NaiveDate>,
-    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone)]
@@ -86,8 +85,7 @@ pub async fn upsert_douban_items(
             rating = EXCLUDED.rating,
             tags = EXCLUDED.tags,
             comment = EXCLUDED.comment,
-            date = EXCLUDED.date,
-            updated_at = NOW()
+            date = EXCLUDED.date
         "#,
     );
 
@@ -164,16 +162,20 @@ pub async fn fetch_douban_marks_by_range(
 
 pub async fn count_recent_douban_items(
     pool: &PgPool,
-    since: DateTime<Utc>,
+    start: NaiveDate,
+    end: NaiveDate,
 ) -> Result<i64, DoubanRepoError> {
     let total: i64 = sqlx::query_scalar(
         r#"
         SELECT COUNT(*)
         FROM douban_items
-        WHERE updated_at >= $1
+        WHERE date IS NOT NULL
+          AND date >= $1
+          AND date <= $2
         "#,
     )
-    .bind(since)
+    .bind(start)
+    .bind(end)
     .fetch_one(pool)
     .await?;
     Ok(total)
@@ -181,7 +183,8 @@ pub async fn count_recent_douban_items(
 
 pub async fn fetch_recent_douban_items(
     pool: &PgPool,
-    since: DateTime<Utc>,
+    start: NaiveDate,
+    end: NaiveDate,
     limit: i64,
 ) -> Result<Vec<DoubanRecentItem>, DoubanRepoError> {
     let rows = sqlx::query_as::<_, DoubanRecentItem>(
@@ -190,15 +193,17 @@ pub async fn fetch_recent_douban_items(
                "type" AS item_type,
                title,
                poster,
-               date,
-               updated_at
+               date
         FROM douban_items
-        WHERE updated_at >= $1
-        ORDER BY updated_at DESC, "type" ASC, id ASC
-        LIMIT $2
+        WHERE date IS NOT NULL
+          AND date >= $1
+          AND date <= $2
+        ORDER BY date DESC, "type" ASC, id ASC
+        LIMIT $3
         "#,
     )
-    .bind(since)
+    .bind(start)
+    .bind(end)
     .bind(limit)
     .fetch_all(pool)
     .await?;

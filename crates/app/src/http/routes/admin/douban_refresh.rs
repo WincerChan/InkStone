@@ -83,7 +83,6 @@ pub struct DoubanRecentEntry {
     id: String,
     title: String,
     date: Option<String>,
-    updated_at: String,
     url: String,
 }
 
@@ -180,9 +179,10 @@ async fn load_overview(
     let pool = state.db.as_ref().ok_or(DoubanAdminError::DbUnavailable)?;
     let overview = fetch_douban_overview(pool).await?;
     let limit = clamp_limit(limit);
-    let since = Utc::now() - Duration::hours(24);
-    let total = count_recent_douban_items(pool, since).await?;
-    let items = fetch_recent_douban_items(pool, since, limit).await?;
+    let today = Utc::now().date_naive();
+    let start = today - Duration::days(1);
+    let total = count_recent_douban_items(pool, start, today).await?;
+    let items = fetch_recent_douban_items(pool, start, today, limit).await?;
     Ok(map_overview(state, overview, total, items))
 }
 
@@ -226,7 +226,6 @@ fn map_recent_entry(item: DoubanRecentItem) -> DoubanRecentEntry {
         id: item.id,
         title: item.title,
         date: item.date.map(|value| value.to_string()),
-        updated_at: item.updated_at.to_rfc3339(),
         url,
     }
 }
