@@ -37,10 +37,11 @@ pub use pulse_admin_repo::{
     PulseSiteOverview, PulseTopPath, PulseTotals,
 };
 pub use search_events_repo::{
-    fetch_filter_usage, fetch_keyword_usage, fetch_search_daily, fetch_search_summary, fetch_sort_usage,
-    fetch_top_categories, fetch_top_queries, fetch_top_tags, insert_search_event, SearchDailyRow,
-    SearchDimCount as SearchDimCountRow, SearchEvent, SearchEventsRepoError, SearchFilterUsage,
-    SearchKeywordUsage, SearchSortUsage, SearchSummaryRow, SearchTopQueryRow,
+    fetch_filter_usage, fetch_keyword_usage, fetch_recent_search_query, fetch_search_daily,
+    fetch_search_summary, fetch_top_categories, fetch_top_queries, fetch_top_tags,
+    insert_search_event, SearchDailyRow, SearchDimCount as SearchDimCountRow, SearchEvent,
+    SearchEventsRepoError, SearchFilterUsage, SearchKeywordUsage, SearchSummaryRow,
+    SearchTopQueryRow,
 };
 pub use migrations::run_migrations;
 pub use pool::{connect_lazy, DbPool, DbPoolError};

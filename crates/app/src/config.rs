@@ -21,6 +21,7 @@ pub struct AppConfig {
     pub douban_user_agent: String,
     pub cookie_secret: Option<String>,
     pub stats_secret: Option<String>,
+    pub search_hash_secret: Option<String>,
     pub valid_paths_url: String,
     pub kudos_flush_interval: Duration,
     pub github_webhook_secret: Option<String>,
@@ -82,6 +83,7 @@ impl AppConfig {
         )?;
         let cookie_secret = read_optional_string("INKSTONE_COOKIE_SECRET")?;
         let stats_secret = read_optional_string("INKSTONE_STATS_SECRET")?;
+        let search_hash_secret = read_optional_string("INKSTONE_SEARCH_HASH_SECRET")?;
         let valid_paths_url = read_string(
             "INKSTONE_VALID_PATHS_URL",
             "https://velite-refactor.blog-8fo.pages.dev/valid_paths.txt",
@@ -119,6 +121,7 @@ impl AppConfig {
             douban_user_agent,
             cookie_secret,
             stats_secret,
+            search_hash_secret,
             valid_paths_url,
             kudos_flush_interval: Duration::from_secs(kudos_flush_secs),
             github_webhook_secret,

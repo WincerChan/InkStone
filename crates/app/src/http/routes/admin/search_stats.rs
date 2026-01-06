@@ -9,9 +9,8 @@ use thiserror::Error;
 use crate::state::AppState;
 use inkstone_infra::db::{
     fetch_filter_usage, fetch_keyword_usage, fetch_search_daily, fetch_search_summary,
-    fetch_sort_usage, fetch_top_categories, fetch_top_queries, fetch_top_tags, SearchDailyRow,
-    SearchDimCountRow, SearchEventsRepoError, SearchFilterUsage, SearchSummaryRow,
-    SearchTopQueryRow,
+    fetch_top_categories, fetch_top_queries, fetch_top_tags, SearchDailyRow, SearchDimCountRow,
+    SearchEventsRepoError, SearchFilterUsage, SearchSummaryRow, SearchTopQueryRow,
 };
 
 const DEFAULT_RANGE_DAYS: i64 = 30;
@@ -51,7 +50,6 @@ pub struct SearchStatsResponse {
     top_tags: Vec<SearchDimEntry>,
     top_categories: Vec<SearchDimEntry>,
     filter_usage: SearchFilterUsageEntry,
-    sort_usage: Vec<SearchDimEntry>,
     keyword_usage: Vec<SearchKeywordEntry>,
 }
 
@@ -83,6 +81,7 @@ pub struct SearchDailyEntry {
 pub struct SearchTopQueryEntry {
     query: String,
     count: i64,
+    requests: i64,
     zero_results: i64,
     zero_result_rate: f64,
     avg_elapsed_ms: Option<i64>,
@@ -122,7 +121,6 @@ pub async fn get_search_stats(
         top_tags,
         top_categories,
         filter_usage,
-        sort_usage,
         keyword_usage,
     ) = tokio::try_join!(
         fetch_search_summary(&pool, from, to),
@@ -131,7 +129,6 @@ pub async fn get_search_stats(
         fetch_top_tags(&pool, from, to, limit),
         fetch_top_categories(&pool, from, to, limit),
         fetch_filter_usage(&pool, from, to),
-        fetch_sort_usage(&pool, from, to, limit),
         fetch_keyword_usage(&pool, from, to, limit),
     )?;
 
@@ -146,13 +143,6 @@ pub async fn get_search_stats(
         top_tags: top_tags.into_iter().map(map_dim_entry).collect(),
         top_categories: top_categories.into_iter().map(map_dim_entry).collect(),
         filter_usage: map_filter_usage(filter_usage),
-        sort_usage: sort_usage
-            .into_iter()
-            .map(|entry| SearchDimEntry {
-                value: entry.sort,
-                count: entry.count,
-            })
-            .collect(),
         keyword_usage: keyword_usage
             .into_iter()
             .map(|entry| SearchKeywordEntry {
@@ -194,14 +184,15 @@ fn map_daily(entry: SearchDailyRow) -> SearchDailyEntry {
 }
 
 fn map_top_query(entry: SearchTopQueryRow) -> SearchTopQueryEntry {
-    let rate = if entry.count == 0 {
+    let rate = if entry.requests == 0 {
         0.0
     } else {
-        entry.zero_results as f64 / entry.count as f64
+        entry.zero_results as f64 / entry.requests as f64
     };
     SearchTopQueryEntry {
         query: entry.query_norm,
         count: entry.count,
+        requests: entry.requests,
         zero_results: entry.zero_results,
         zero_result_rate: rate,
         avg_elapsed_ms: round_ms(entry.avg_elapsed_ms),

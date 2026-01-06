@@ -19,6 +19,7 @@ pub struct SearchEvent {
     pub range_end: Option<NaiveDate>,
     pub sort: String,
     pub kind: String,
+    pub search_user_hash: Option<String>,
     pub result_total: i32,
     pub elapsed_ms: i32,
 }
@@ -42,6 +43,7 @@ pub struct SearchDailyRow {
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct SearchTopQueryRow {
     pub query_norm: String,
+    pub requests: i64,
     pub count: i64,
     pub zero_results: i64,
     pub avg_elapsed_ms: Option<f64>,
@@ -58,12 +60,6 @@ pub struct SearchFilterUsage {
     pub with_tags: i64,
     pub with_category: i64,
     pub with_range: i64,
-}
-
-#[derive(Debug, Clone, sqlx::FromRow)]
-pub struct SearchSortUsage {
-    pub sort: String,
-    pub count: i64,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -88,10 +84,11 @@ pub async fn insert_search_event(
             range_end,
             sort,
             kind,
+            search_user_hash,
             result_total,
             elapsed_ms
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         "#,
     )
     .bind(&event.query_raw)
@@ -103,11 +100,35 @@ pub async fn insert_search_event(
     .bind(event.range_end)
     .bind(&event.sort)
     .bind(&event.kind)
+    .bind(event.search_user_hash.as_deref())
     .bind(event.result_total)
     .bind(event.elapsed_ms)
     .execute(pool)
     .await?;
     Ok(())
+}
+
+pub async fn fetch_recent_search_query(
+    pool: &PgPool,
+    search_user_hash: &str,
+    within_secs: i64,
+) -> Result<Option<String>, SearchEventsRepoError> {
+    let query_norm: Option<String> = sqlx::query_scalar(
+        r#"
+        SELECT query_norm
+        FROM search_events
+        WHERE kind = 'search'
+          AND search_user_hash = $1
+          AND ts >= NOW() - ($2 * interval '1 second')
+        ORDER BY ts DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(search_user_hash)
+    .bind(within_secs)
+    .fetch_optional(pool)
+    .await?;
+    Ok(query_norm)
 }
 
 pub async fn fetch_search_summary(
@@ -171,7 +192,11 @@ pub async fn fetch_top_queries(
         r#"
         SELECT
             query_norm,
-            COUNT(*)::bigint AS count,
+            COUNT(*)::bigint AS requests,
+            (
+                COUNT(DISTINCT search_user_hash)
+                + COUNT(*) FILTER (WHERE search_user_hash IS NULL)
+            )::bigint AS count,
             COUNT(*) FILTER (WHERE result_total = 0)::bigint AS zero_results,
             AVG(elapsed_ms)::double precision AS avg_elapsed_ms
         FROM search_events
@@ -270,33 +295,6 @@ pub async fn fetch_filter_usage(
     .fetch_one(pool)
     .await?;
     Ok(row)
-}
-
-pub async fn fetch_sort_usage(
-    pool: &PgPool,
-    from: NaiveDate,
-    to: NaiveDate,
-    limit: i64,
-) -> Result<Vec<SearchSortUsage>, SearchEventsRepoError> {
-    let rows = sqlx::query_as::<_, SearchSortUsage>(
-        r#"
-        SELECT
-            sort,
-            COUNT(*)::bigint AS count
-        FROM search_events
-        WHERE day BETWEEN $1 AND $2
-          AND kind = 'sort'
-        GROUP BY sort
-        ORDER BY count DESC
-        LIMIT $3
-        "#,
-    )
-    .bind(from)
-    .bind(to)
-    .bind(limit)
-    .fetch_all(pool)
-    .await?;
-    Ok(rows)
 }
 
 pub async fn fetch_keyword_usage(

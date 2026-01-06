@@ -1,20 +1,26 @@
 use std::time::Instant;
 
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
+use chrono::Utc;
+use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use thiserror::Error;
 use tracing::{info, warn};
 
 use crate::state::AppState;
 use inkstone_core::domain::search::{SearchHit, SearchQuery, SearchResult};
 use inkstone_core::types::time_range::TimeRange;
-use inkstone_infra::db::{insert_search_event, SearchEvent};
+use inkstone_infra::db::{fetch_recent_search_query, insert_search_event, SearchEvent};
 use inkstone_infra::search::{parse_query, QueryParseError, SearchIndexError, SearchSort};
 
 const MAX_QUERY_LEN: usize = 256;
+const SEARCH_EVENT_DEDUP_SECS: i64 = 30 * 60;
 
 #[derive(Debug, Deserialize)]
 pub struct SearchParams {
@@ -49,23 +55,6 @@ impl SearchSortParam {
         match self {
             SearchSortParam::Relevance => "relevance",
             SearchSortParam::Latest => "latest",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SearchEventKind {
-    Search,
-    Sort,
-    Page,
-}
-
-impl SearchEventKind {
-    fn as_str(self) -> &'static str {
-        match self {
-            SearchEventKind::Search => "search",
-            SearchEventKind::Sort => "sort",
-            SearchEventKind::Page => "page",
         }
     }
 }
@@ -111,6 +100,7 @@ struct ErrorBody {
 pub async fn search(
     State(state): State<AppState>,
     Query(params): Query<SearchParams>,
+    headers: HeaderMap,
 ) -> Result<Json<SearchResponse>, SearchApiError> {
     let started_at = Instant::now();
     let query_text = params.q.unwrap_or_default();
@@ -129,7 +119,9 @@ pub async fn search(
         .min(state.config.max_search_limit);
     let offset = params.offset.unwrap_or(0);
     let sort = params.sort.unwrap_or_default();
-    let kind = determine_event_kind(offset, sort);
+    let kind = "search";
+    let search_user_hash =
+        build_search_user_hash(state.config.search_hash_secret.as_deref(), &headers);
 
     let query = match parse_query(&query_text) {
         Ok(query) => query,
@@ -158,9 +150,35 @@ pub async fn search(
 
     let elapsed_ms = started_at.elapsed().as_millis();
     if let Some(pool) = state.db.as_ref() {
-        let event = build_search_event(&query_text, &query, sort, kind, result.total, elapsed_ms);
-        if let Err(err) = insert_search_event(pool, &event).await {
-            warn!(error = %err, "failed to store search event");
+        let event = build_search_event(
+            &query_text,
+            &query,
+            sort,
+            kind,
+            result.total,
+            elapsed_ms,
+            search_user_hash.clone(),
+        );
+        let should_insert = if kind == "search" {
+            if let Some(hash) = search_user_hash.as_deref() {
+                match fetch_recent_search_query(pool, hash, SEARCH_EVENT_DEDUP_SECS).await {
+                    Ok(Some(last_query)) => last_query != event.query_norm,
+                    Ok(None) => true,
+                    Err(err) => {
+                        warn!(error = %err, "failed to check recent search event");
+                        true
+                    }
+                }
+            } else {
+                true
+            }
+        } else {
+            true
+        };
+        if should_insert {
+            if let Err(err) = insert_search_event(pool, &event).await {
+                warn!(error = %err, "failed to store search event");
+            }
         }
     }
     info!(
@@ -191,9 +209,10 @@ fn build_search_event(
     query_text: &str,
     query: &SearchQuery,
     sort: SearchSortParam,
-    kind: SearchEventKind,
+    kind: &str,
     total: usize,
     elapsed_ms: u128,
+    search_user_hash: Option<String>,
 ) -> SearchEvent {
     let raw = query_text.trim().to_string();
     let keyword_count = query.keywords.len() as i32;
@@ -250,20 +269,11 @@ fn build_search_event(
         range_start: query.range.as_ref().and_then(|range| range.start),
         range_end: query.range.as_ref().and_then(|range| range.end),
         sort: sort.as_str().to_string(),
-        kind: kind.as_str().to_string(),
+        kind: kind.to_string(),
+        search_user_hash,
         result_total: clamp_i32(total as i64),
         elapsed_ms: clamp_i32(elapsed_ms as i64),
     }
-}
-
-fn determine_event_kind(offset: usize, sort: SearchSortParam) -> SearchEventKind {
-    if offset > 0 {
-        return SearchEventKind::Page;
-    }
-    if sort != SearchSortParam::default() {
-        return SearchEventKind::Sort;
-    }
-    SearchEventKind::Search
 }
 
 fn normalize_token(value: &str) -> String {
@@ -290,6 +300,42 @@ fn clamp_i32(value: i64) -> i32 {
     } else {
         value as i32
     }
+}
+
+fn build_search_user_hash(secret: Option<&str>, headers: &HeaderMap) -> Option<String> {
+    let secret = secret.map(str::trim).filter(|value| !value.is_empty())?;
+    let client_ip = extract_client_ip(headers)?;
+    let ua = header_value(headers, "user-agent")?.trim();
+    if ua.is_empty() {
+        return None;
+    }
+    let day_bucket = Utc::now().format("%Y%m%d").to_string();
+    let payload = format!("{client_ip}|{ua}|{day_bucket}");
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).ok()?;
+    mac.update(payload.as_bytes());
+    let raw = mac.finalize().into_bytes();
+    Some(URL_SAFE_NO_PAD.encode(raw))
+}
+
+fn extract_client_ip(headers: &HeaderMap) -> Option<String> {
+    header_value(headers, "cf-connecting-ip")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .or_else(|| header_value(headers, "x-forwarded-for").and_then(parse_forwarded_for))
+}
+
+fn parse_forwarded_for(value: &str) -> Option<String> {
+    value
+        .split(',')
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+}
+
+fn header_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    headers.get(name)?.to_str().ok()
 }
 
 fn enforce_query_length(query_text: &str) -> Result<(), SearchApiError> {
@@ -362,8 +408,8 @@ impl IntoResponse for SearchApiError {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_matched, determine_event_kind, enforce_query_length, MatchedFields, SearchApiError,
-        SearchEventKind, SearchSortParam, MAX_QUERY_LEN,
+        build_matched, enforce_query_length, MatchedFields, SearchApiError, SearchSortParam,
+        MAX_QUERY_LEN,
     };
     use chrono::{TimeZone, Utc};
     use inkstone_core::domain::search::{SearchHit, SearchQuery};
@@ -448,23 +494,9 @@ mod tests {
         );
     }
 
+
     #[test]
-    fn determine_event_kind_classifies_offset_and_sort() {
-        assert_eq!(
-            determine_event_kind(0, SearchSortParam::Relevance),
-            SearchEventKind::Search
-        );
-        assert_eq!(
-            determine_event_kind(0, SearchSortParam::Latest),
-            SearchEventKind::Sort
-        );
-        assert_eq!(
-            determine_event_kind(20, SearchSortParam::Latest),
-            SearchEventKind::Page
-        );
-        assert_eq!(
-            determine_event_kind(10, SearchSortParam::Relevance),
-            SearchEventKind::Page
-        );
+    fn search_event_dedup_window_is_half_hour() {
+        assert_eq!(SEARCH_EVENT_DEDUP_SECS, 1_800);
     }
 }
