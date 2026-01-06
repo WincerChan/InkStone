@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use chrono::{NaiveDate, Utc};
 use scraper::{ElementRef, Html, Selector};
 use serde::Serialize;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use crate::jobs::JobError;
 use crate::state::AppState;

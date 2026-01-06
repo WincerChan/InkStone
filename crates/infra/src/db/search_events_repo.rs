@@ -18,6 +18,7 @@ pub struct SearchEvent {
     pub range_start: Option<NaiveDate>,
     pub range_end: Option<NaiveDate>,
     pub sort: String,
+    pub kind: String,
     pub result_total: i32,
     pub elapsed_ms: i32,
 }
@@ -86,10 +87,11 @@ pub async fn insert_search_event(
             range_start,
             range_end,
             sort,
+            kind,
             result_total,
             elapsed_ms
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         "#,
     )
     .bind(&event.query_raw)
@@ -100,6 +102,7 @@ pub async fn insert_search_event(
     .bind(event.range_start)
     .bind(event.range_end)
     .bind(&event.sort)
+    .bind(&event.kind)
     .bind(event.result_total)
     .bind(event.elapsed_ms)
     .execute(pool)
@@ -122,6 +125,7 @@ pub async fn fetch_search_summary(
                 AS p95_elapsed_ms
         FROM search_events
         WHERE day BETWEEN $1 AND $2
+          AND kind = 'search'
         "#,
     )
     .bind(from)
@@ -145,6 +149,7 @@ pub async fn fetch_search_daily(
             AVG(elapsed_ms)::double precision AS avg_elapsed_ms
         FROM search_events
         WHERE day BETWEEN $1 AND $2
+          AND kind = 'search'
         GROUP BY day
         ORDER BY day
         "#,
@@ -171,6 +176,7 @@ pub async fn fetch_top_queries(
             AVG(elapsed_ms)::double precision AS avg_elapsed_ms
         FROM search_events
         WHERE day BETWEEN $1 AND $2
+          AND kind = 'search'
         GROUP BY query_norm
         ORDER BY count DESC
         LIMIT $3
@@ -199,6 +205,7 @@ pub async fn fetch_top_tags(
         JOIN LATERAL unnest(tags) AS tag ON TRUE
         WHERE day BETWEEN $1 AND $2
           AND tag <> ''
+          AND kind = 'search'
         GROUP BY tag
         ORDER BY count DESC
         LIMIT $3
@@ -227,6 +234,7 @@ pub async fn fetch_top_categories(
         WHERE day BETWEEN $1 AND $2
           AND category IS NOT NULL
           AND category <> ''
+          AND kind = 'search'
         GROUP BY category
         ORDER BY count DESC
         LIMIT $3
@@ -254,6 +262,7 @@ pub async fn fetch_filter_usage(
                 AS with_range
         FROM search_events
         WHERE day BETWEEN $1 AND $2
+          AND kind = 'search'
         "#,
     )
     .bind(from)
@@ -276,6 +285,7 @@ pub async fn fetch_sort_usage(
             COUNT(*)::bigint AS count
         FROM search_events
         WHERE day BETWEEN $1 AND $2
+          AND kind = 'sort'
         GROUP BY sort
         ORDER BY count DESC
         LIMIT $3
@@ -302,6 +312,7 @@ pub async fn fetch_keyword_usage(
             COUNT(*)::bigint AS count
         FROM search_events
         WHERE day BETWEEN $1 AND $2
+          AND kind = 'search'
         GROUP BY keyword_count
         ORDER BY count DESC
         LIMIT $3

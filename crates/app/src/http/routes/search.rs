@@ -24,7 +24,7 @@ pub struct SearchParams {
     pub sort: Option<SearchSortParam>,
 }
 
-#[derive(Debug, Deserialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum SearchSortParam {
     Relevance,
@@ -49,6 +49,23 @@ impl SearchSortParam {
         match self {
             SearchSortParam::Relevance => "relevance",
             SearchSortParam::Latest => "latest",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchEventKind {
+    Search,
+    Sort,
+    Page,
+}
+
+impl SearchEventKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            SearchEventKind::Search => "search",
+            SearchEventKind::Sort => "sort",
+            SearchEventKind::Page => "page",
         }
     }
 }
@@ -112,6 +129,7 @@ pub async fn search(
         .min(state.config.max_search_limit);
     let offset = params.offset.unwrap_or(0);
     let sort = params.sort.unwrap_or_default();
+    let kind = determine_event_kind(offset, sort);
 
     let query = match parse_query(&query_text) {
         Ok(query) => query,
@@ -140,7 +158,7 @@ pub async fn search(
 
     let elapsed_ms = started_at.elapsed().as_millis();
     if let Some(pool) = state.db.as_ref() {
-        let event = build_search_event(&query_text, &query, sort, result.total, elapsed_ms);
+        let event = build_search_event(&query_text, &query, sort, kind, result.total, elapsed_ms);
         if let Err(err) = insert_search_event(pool, &event).await {
             warn!(error = %err, "failed to store search event");
         }
@@ -173,6 +191,7 @@ fn build_search_event(
     query_text: &str,
     query: &SearchQuery,
     sort: SearchSortParam,
+    kind: SearchEventKind,
     total: usize,
     elapsed_ms: u128,
 ) -> SearchEvent {
@@ -231,9 +250,20 @@ fn build_search_event(
         range_start: query.range.as_ref().and_then(|range| range.start),
         range_end: query.range.as_ref().and_then(|range| range.end),
         sort: sort.as_str().to_string(),
+        kind: kind.as_str().to_string(),
         result_total: clamp_i32(total as i64),
         elapsed_ms: clamp_i32(elapsed_ms as i64),
     }
+}
+
+fn determine_event_kind(offset: usize, sort: SearchSortParam) -> SearchEventKind {
+    if offset > 0 {
+        return SearchEventKind::Page;
+    }
+    if sort != SearchSortParam::default() {
+        return SearchEventKind::Sort;
+    }
+    SearchEventKind::Search
 }
 
 fn normalize_token(value: &str) -> String {
@@ -332,8 +362,8 @@ impl IntoResponse for SearchApiError {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_matched, enforce_query_length, MatchedFields, SearchApiError, SearchSortParam,
-        MAX_QUERY_LEN,
+        build_matched, determine_event_kind, enforce_query_length, MatchedFields, SearchApiError,
+        SearchEventKind, SearchSortParam, MAX_QUERY_LEN,
     };
     use chrono::{TimeZone, Utc};
     use inkstone_core::domain::search::{SearchHit, SearchQuery};
@@ -415,6 +445,26 @@ mod tests {
                 tags: Vec::new(),
                 category: true
             }
+        );
+    }
+
+    #[test]
+    fn determine_event_kind_classifies_offset_and_sort() {
+        assert_eq!(
+            determine_event_kind(0, SearchSortParam::Relevance),
+            SearchEventKind::Search
+        );
+        assert_eq!(
+            determine_event_kind(0, SearchSortParam::Latest),
+            SearchEventKind::Sort
+        );
+        assert_eq!(
+            determine_event_kind(20, SearchSortParam::Latest),
+            SearchEventKind::Page
+        );
+        assert_eq!(
+            determine_event_kind(10, SearchSortParam::Relevance),
+            SearchEventKind::Page
         );
     }
 }
