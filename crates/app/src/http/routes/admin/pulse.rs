@@ -13,7 +13,7 @@ use inkstone_infra::db::{
     fetch_active_totals, fetch_active_ua_counts, fetch_country_stats, fetch_daily,
     fetch_device_stats, fetch_ref_host_stats, fetch_source_stats, fetch_totals, fetch_top_paths,
     fetch_ua_stats, list_sites, AnalyticsRepoError, PulseActiveMinuteUv, PulseDailyStat,
-    PulseDimCount, PulseDimStats, PulseSiteOverview, PulseTopPath, PulseTotals,
+    PulseDimCount, PulseDimStats, PulseFilters, PulseSiteOverview, PulseTopPath, PulseTotals,
 };
 
 const DEFAULT_RANGE_DAYS: i64 = 30;
@@ -21,6 +21,7 @@ const DEFAULT_ACTIVE_MINUTES: i64 = 5;
 const DEFAULT_TOP_LIMIT: i64 = 20;
 const MAX_TOP_LIMIT: i64 = 200;
 const MAX_SITE_LEN: usize = 255;
+const MAX_FILTER_LEN: usize = 255;
 
 #[derive(Debug, Deserialize)]
 pub struct PulseSiteQuery {
@@ -28,6 +29,11 @@ pub struct PulseSiteQuery {
     pub from: Option<String>,
     pub to: Option<String>,
     pub limit: Option<i64>,
+    pub device: Option<String>,
+    pub ua_family: Option<String>,
+    pub source_type: Option<String>,
+    pub ref_host: Option<String>,
+    pub country: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -35,12 +41,22 @@ pub struct PulseActiveQuery {
     pub site: Option<String>,
     pub minutes: Option<i64>,
     pub limit: Option<i64>,
+    pub device: Option<String>,
+    pub ua_family: Option<String>,
+    pub source_type: Option<String>,
+    pub ref_host: Option<String>,
+    pub country: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct PulseActiveSummaryQuery {
     pub site: Option<String>,
     pub minutes: Option<i64>,
+    pub device: Option<String>,
+    pub ua_family: Option<String>,
+    pub source_type: Option<String>,
+    pub ref_host: Option<String>,
+    pub country: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -49,6 +65,16 @@ pub enum PulseAdminError {
     MissingSite,
     #[error("site is invalid")]
     InvalidSite,
+    #[error("device is invalid")]
+    InvalidDevice,
+    #[error("ua_family is invalid")]
+    InvalidUaFamily,
+    #[error("source_type is invalid")]
+    InvalidSourceType,
+    #[error("ref_host is invalid")]
+    InvalidRefHost,
+    #[error("country is invalid")]
+    InvalidCountry,
     #[error("active window is invalid")]
     InvalidWindow,
     #[error("invalid date")]
@@ -190,18 +216,25 @@ pub async fn get_pulse_site(
     let site = normalize_site_param(query.site.as_deref())?;
     let (from, to) = parse_range(query.from.as_deref(), query.to.as_deref())?;
     let limit = clamp_limit(query.limit);
+    let filters = parse_filters(
+        query.device.as_deref(),
+        query.ua_family.as_deref(),
+        query.source_type.as_deref(),
+        query.ref_host.as_deref(),
+        query.country.as_deref(),
+    )?;
     let pool = state.db.as_ref().ok_or(PulseAdminError::DbUnavailable)?.clone();
 
     let (totals, daily, top_paths, devices, ua_families, source_types, ref_hosts, countries) =
         tokio::try_join!(
-            fetch_totals(&pool, &site, from, to),
-            fetch_daily(&pool, &site, from, to),
-            fetch_top_paths(&pool, &site, from, to, limit),
-            fetch_device_stats(&pool, &site, from, to, limit),
-            fetch_ua_stats(&pool, &site, from, to, limit),
-            fetch_source_stats(&pool, &site, from, to, limit),
-            fetch_ref_host_stats(&pool, &site, from, to, limit),
-            fetch_country_stats(&pool, &site, from, to, limit),
+            fetch_totals(&pool, &site, from, to, &filters),
+            fetch_daily(&pool, &site, from, to, &filters),
+            fetch_top_paths(&pool, &site, from, to, &filters, limit),
+            fetch_device_stats(&pool, &site, from, to, &filters, limit),
+            fetch_ua_stats(&pool, &site, from, to, &filters, limit),
+            fetch_source_stats(&pool, &site, from, to, &filters, limit),
+            fetch_ref_host_stats(&pool, &site, from, to, &filters, limit),
+            fetch_country_stats(&pool, &site, from, to, &filters, limit),
         )?;
 
     Ok(Json(PulseSiteStatsResponse {
@@ -228,18 +261,25 @@ pub async fn get_pulse_active(
     let site = normalize_site_param(query.site.as_deref())?;
     let minutes = parse_active_minutes(query.minutes)?;
     let limit = clamp_limit(query.limit);
+    let filters = parse_filters(
+        query.device.as_deref(),
+        query.ua_family.as_deref(),
+        query.source_type.as_deref(),
+        query.ref_host.as_deref(),
+        query.country.as_deref(),
+    )?;
     let pool = state.db.as_ref().ok_or(PulseAdminError::DbUnavailable)?.clone();
     let (from, to) = active_range(minutes);
     let (totals, minutes, top_paths, devices, ua_families, source_types, ref_hosts, countries) =
         tokio::try_join!(
-            fetch_active_totals(&pool, &site, from, to),
-            fetch_active_minute_uv(&pool, &site, from, to),
-            fetch_active_top_paths(&pool, &site, from, to, limit),
-            fetch_active_device_counts(&pool, &site, from, to, limit),
-            fetch_active_ua_counts(&pool, &site, from, to, limit),
-            fetch_active_source_counts(&pool, &site, from, to, limit),
-            fetch_active_ref_host_counts(&pool, &site, from, to, limit),
-            fetch_active_country_counts(&pool, &site, from, to, limit),
+            fetch_active_totals(&pool, &site, from, to, &filters),
+            fetch_active_minute_uv(&pool, &site, from, to, &filters),
+            fetch_active_top_paths(&pool, &site, from, to, &filters, limit),
+            fetch_active_device_counts(&pool, &site, from, to, &filters, limit),
+            fetch_active_ua_counts(&pool, &site, from, to, &filters, limit),
+            fetch_active_source_counts(&pool, &site, from, to, &filters, limit),
+            fetch_active_ref_host_counts(&pool, &site, from, to, &filters, limit),
+            fetch_active_country_counts(&pool, &site, from, to, &filters, limit),
         )?;
 
     Ok(Json(PulseActiveResponse {
@@ -266,9 +306,16 @@ pub async fn get_pulse_active_summary(
 ) -> Result<Json<PulseActiveSummaryResponse>, PulseAdminError> {
     let site = normalize_site_param(query.site.as_deref())?;
     let minutes = parse_active_minutes(query.minutes)?;
+    let filters = parse_filters(
+        query.device.as_deref(),
+        query.ua_family.as_deref(),
+        query.source_type.as_deref(),
+        query.ref_host.as_deref(),
+        query.country.as_deref(),
+    )?;
     let pool = state.db.as_ref().ok_or(PulseAdminError::DbUnavailable)?.clone();
     let (from, to) = active_range(minutes);
-    let totals = fetch_active_totals(&pool, &site, from, to).await?;
+    let totals = fetch_active_totals(&pool, &site, from, to, &filters).await?;
 
     Ok(Json(PulseActiveSummaryResponse {
         site,
@@ -385,6 +432,78 @@ fn normalize_site_param(value: Option<&str>) -> Result<String, PulseAdminError> 
     Ok(normalized)
 }
 
+fn parse_filters(
+    device: Option<&str>,
+    ua_family: Option<&str>,
+    source_type: Option<&str>,
+    ref_host: Option<&str>,
+    country: Option<&str>,
+) -> Result<PulseFilters, PulseAdminError> {
+    Ok(PulseFilters {
+        device: normalize_filter_value(device, PulseAdminError::InvalidDevice)?,
+        ua_family: normalize_filter_value(ua_family, PulseAdminError::InvalidUaFamily)?,
+        source_type: normalize_filter_value(source_type, PulseAdminError::InvalidSourceType)?,
+        ref_host: normalize_ref_host_filter(ref_host)?,
+        country: normalize_filter_value(country, PulseAdminError::InvalidCountry)?,
+    })
+}
+
+fn normalize_filter_value(
+    value: Option<&str>,
+    error: PulseAdminError,
+) -> Result<Option<String>, PulseAdminError> {
+    let trimmed = match value {
+        Some(raw) => raw.trim(),
+        None => return Ok(None),
+    };
+    if trimmed.is_empty()
+        || trimmed.len() > MAX_FILTER_LEN
+        || trimmed.chars().any(|ch| ch.is_whitespace())
+        || trimmed.contains(',')
+    {
+        return Err(error);
+    }
+    Ok(Some(trimmed.to_ascii_lowercase()))
+}
+
+fn normalize_ref_host_filter(value: Option<&str>) -> Result<Option<String>, PulseAdminError> {
+    let trimmed = match value {
+        Some(raw) => raw.trim(),
+        None => return Ok(None),
+    };
+    if trimmed.is_empty()
+        || trimmed.len() > MAX_FILTER_LEN
+        || trimmed.chars().any(|ch| ch.is_whitespace())
+        || trimmed.contains(',')
+    {
+        return Err(PulseAdminError::InvalidRefHost);
+    }
+    let host = parse_ref_host(trimmed).ok_or(PulseAdminError::InvalidRefHost)?;
+    if host.len() > MAX_FILTER_LEN {
+        return Err(PulseAdminError::InvalidRefHost);
+    }
+    Ok(Some(host.to_ascii_lowercase()))
+}
+
+fn parse_ref_host(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let without_scheme = trimmed
+        .strip_prefix("https://")
+        .or_else(|| trimmed.strip_prefix("http://"))
+        .unwrap_or(trimmed);
+    let host_port = without_scheme.split('/').next().unwrap_or(without_scheme);
+    let host_port = host_port.split('@').last().unwrap_or(host_port);
+    let host = host_port.split(':').next().unwrap_or(host_port).trim();
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
+}
+
 fn normalize_host_value(value: &str) -> Result<String, PulseAdminError> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -415,6 +534,11 @@ impl IntoResponse for PulseAdminError {
         let (status, message) = match &self {
             PulseAdminError::MissingSite
             | PulseAdminError::InvalidSite
+            | PulseAdminError::InvalidDevice
+            | PulseAdminError::InvalidUaFamily
+            | PulseAdminError::InvalidSourceType
+            | PulseAdminError::InvalidRefHost
+            | PulseAdminError::InvalidCountry
             | PulseAdminError::InvalidWindow
             | PulseAdminError::InvalidDate
             | PulseAdminError::InvalidDateRange => (StatusCode::BAD_REQUEST, self.to_string()),
@@ -428,7 +552,10 @@ impl IntoResponse for PulseAdminError {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_site_param, parse_active_minutes, parse_date, parse_range};
+    use super::{
+        normalize_filter_value, normalize_ref_host_filter, normalize_site_param,
+        parse_active_minutes, parse_date, parse_range, PulseAdminError,
+    };
 
     #[test]
     fn parse_date_rejects_invalid() {
@@ -455,5 +582,28 @@ mod tests {
     #[test]
     fn parse_active_minutes_rejects_zero() {
         assert!(parse_active_minutes(Some(0)).is_err());
+    }
+
+    #[test]
+    fn normalize_filter_value_lowercases() {
+        let value = normalize_filter_value(Some("Chrome"), PulseAdminError::InvalidUaFamily)
+            .unwrap()
+            .unwrap();
+        assert_eq!(value, "chrome");
+    }
+
+    #[test]
+    fn normalize_filter_value_rejects_commas() {
+        assert!(
+            normalize_filter_value(Some("mobile,desktop"), PulseAdminError::InvalidDevice).is_err()
+        );
+    }
+
+    #[test]
+    fn normalize_ref_host_filter_extracts_host() {
+        let value = normalize_ref_host_filter(Some("https://Example.COM:443/path"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(value, "example.com");
     }
 }

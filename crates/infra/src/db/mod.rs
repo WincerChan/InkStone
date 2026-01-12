@@ -34,7 +34,7 @@ pub use pulse_admin_repo::{
     fetch_active_totals, fetch_active_ua_counts, fetch_country_stats, fetch_daily,
     fetch_device_stats, fetch_ref_host_stats, fetch_source_stats, fetch_totals, fetch_top_paths,
     fetch_ua_stats, list_sites, PulseActiveMinuteUv, PulseDailyStat, PulseDimCount, PulseDimStats,
-    PulseSiteOverview, PulseTopPath, PulseTotals,
+    PulseFilters, PulseSiteOverview, PulseTopPath, PulseTotals,
 };
 pub use search_events_repo::{
     fetch_filter_usage, fetch_keyword_usage, fetch_recent_search_query, fetch_search_daily,
