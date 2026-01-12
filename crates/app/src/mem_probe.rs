@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use chrono::Utc;
 use tracing::{info, warn};
 
+#[cfg(feature = "jemalloc")]
 const HEAP_DUMP_DIR: &str = "/data/heap";
 
 #[derive(Debug, Default)]
