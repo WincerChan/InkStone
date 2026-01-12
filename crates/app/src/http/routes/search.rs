@@ -409,7 +409,7 @@ impl IntoResponse for SearchApiError {
 mod tests {
     use super::{
         build_matched, enforce_query_length, MatchedFields, SearchApiError, SearchSortParam,
-        MAX_QUERY_LEN,
+        MAX_QUERY_LEN, SEARCH_EVENT_DEDUP_SECS,
     };
     use chrono::{TimeZone, Utc};
     use inkstone_core::domain::search::{SearchHit, SearchQuery};

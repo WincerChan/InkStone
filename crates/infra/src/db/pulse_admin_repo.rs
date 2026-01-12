@@ -3,6 +3,16 @@ use sqlx::PgPool;
 
 use super::AnalyticsRepoError;
 
+#[derive(Debug, Clone, Default)]
+pub struct PulseFilters {
+    pub device: Option<String>,
+    pub ua_family: Option<String>,
+    pub source_type: Option<String>,
+    pub ref_host: Option<String>,
+    pub country: Option<String>,
+    pub path: Option<String>,
+}
+
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct PulseSiteOverview {
     pub site: String,
@@ -84,6 +94,7 @@ pub async fn fetch_totals(
     site: &str,
     from: NaiveDate,
     to: NaiveDate,
+    filters: &PulseFilters,
 ) -> Result<PulseTotals, AnalyticsRepoError> {
     let row = sqlx::query_as::<_, PulseTotals>(
         r#"
@@ -94,11 +105,23 @@ pub async fn fetch_totals(
             COALESCE(SUM(duration_ms), 0)::bigint AS total_duration_ms
         FROM pulse_events
         WHERE site = $1 AND day BETWEEN $2 AND $3
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (device IS NULL OR device = '')) OR device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (ua_family IS NULL OR ua_family = '')) OR ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (country IS NULL OR country = '')) OR country = $8)
+          AND ($9 IS NULL OR path = $9)
         "#,
     )
     .bind(site)
     .bind(from)
     .bind(to)
+    .bind(filters.device.as_deref())
+    .bind(filters.ua_family.as_deref())
+    .bind(filters.source_type.as_deref())
+    .bind(filters.ref_host.as_deref())
+    .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .fetch_one(pool)
     .await?;
     Ok(row)
@@ -109,6 +132,7 @@ pub async fn fetch_daily(
     site: &str,
     from: NaiveDate,
     to: NaiveDate,
+    filters: &PulseFilters,
 ) -> Result<Vec<PulseDailyStat>, AnalyticsRepoError> {
     let rows = sqlx::query_as::<_, PulseDailyStat>(
         r#"
@@ -120,6 +144,12 @@ pub async fn fetch_daily(
             COALESCE(SUM(duration_ms), 0)::bigint AS total_duration_ms
         FROM pulse_events
         WHERE site = $1 AND day BETWEEN $2 AND $3
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (device IS NULL OR device = '')) OR device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (ua_family IS NULL OR ua_family = '')) OR ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (country IS NULL OR country = '')) OR country = $8)
+          AND ($9 IS NULL OR path = $9)
         GROUP BY day
         ORDER BY day
         "#,
@@ -127,6 +157,12 @@ pub async fn fetch_daily(
     .bind(site)
     .bind(from)
     .bind(to)
+    .bind(filters.device.as_deref())
+    .bind(filters.ua_family.as_deref())
+    .bind(filters.source_type.as_deref())
+    .bind(filters.ref_host.as_deref())
+    .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .fetch_all(pool)
     .await?;
     Ok(rows)
@@ -137,6 +173,7 @@ pub async fn fetch_top_paths(
     site: &str,
     from: NaiveDate,
     to: NaiveDate,
+    filters: &PulseFilters,
     limit: i64,
 ) -> Result<Vec<PulseTopPath>, AnalyticsRepoError> {
     let rows = sqlx::query_as::<_, PulseTopPath>(
@@ -150,14 +187,26 @@ pub async fn fetch_top_paths(
           AND day BETWEEN $2 AND $3
           AND path IS NOT NULL
           AND path <> ''
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (device IS NULL OR device = '')) OR device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (ua_family IS NULL OR ua_family = '')) OR ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (country IS NULL OR country = '')) OR country = $8)
+          AND ($9 IS NULL OR path = $9)
         GROUP BY path
         ORDER BY pv DESC
-        LIMIT $4
+        LIMIT $10
         "#,
     )
     .bind(site)
     .bind(from)
     .bind(to)
+    .bind(filters.device.as_deref())
+    .bind(filters.ua_family.as_deref())
+    .bind(filters.source_type.as_deref())
+    .bind(filters.ref_host.as_deref())
+    .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -169,6 +218,7 @@ pub async fn fetch_device_stats(
     site: &str,
     from: NaiveDate,
     to: NaiveDate,
+    filters: &PulseFilters,
     limit: i64,
 ) -> Result<Vec<PulseDimStats>, AnalyticsRepoError> {
     let rows = sqlx::query_as::<_, PulseDimStats>(
@@ -180,14 +230,26 @@ pub async fn fetch_device_stats(
         FROM pulse_events
         WHERE site = $1
           AND day BETWEEN $2 AND $3
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (device IS NULL OR device = '')) OR device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (ua_family IS NULL OR ua_family = '')) OR ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (country IS NULL OR country = '')) OR country = $8)
+          AND ($9 IS NULL OR path = $9)
         GROUP BY value
         ORDER BY pv DESC
-        LIMIT $4
+        LIMIT $10
         "#,
     )
     .bind(site)
     .bind(from)
     .bind(to)
+    .bind(filters.device.as_deref())
+    .bind(filters.ua_family.as_deref())
+    .bind(filters.source_type.as_deref())
+    .bind(filters.ref_host.as_deref())
+    .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -199,6 +261,7 @@ pub async fn fetch_ua_stats(
     site: &str,
     from: NaiveDate,
     to: NaiveDate,
+    filters: &PulseFilters,
     limit: i64,
 ) -> Result<Vec<PulseDimStats>, AnalyticsRepoError> {
     let rows = sqlx::query_as::<_, PulseDimStats>(
@@ -210,14 +273,26 @@ pub async fn fetch_ua_stats(
         FROM pulse_events
         WHERE site = $1
           AND day BETWEEN $2 AND $3
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (device IS NULL OR device = '')) OR device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (ua_family IS NULL OR ua_family = '')) OR ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (country IS NULL OR country = '')) OR country = $8)
+          AND ($9 IS NULL OR path = $9)
         GROUP BY value
         ORDER BY pv DESC
-        LIMIT $4
+        LIMIT $10
         "#,
     )
     .bind(site)
     .bind(from)
     .bind(to)
+    .bind(filters.device.as_deref())
+    .bind(filters.ua_family.as_deref())
+    .bind(filters.source_type.as_deref())
+    .bind(filters.ref_host.as_deref())
+    .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -229,6 +304,7 @@ pub async fn fetch_source_stats(
     site: &str,
     from: NaiveDate,
     to: NaiveDate,
+    filters: &PulseFilters,
     limit: i64,
 ) -> Result<Vec<PulseDimStats>, AnalyticsRepoError> {
     let rows = sqlx::query_as::<_, PulseDimStats>(
@@ -240,14 +316,26 @@ pub async fn fetch_source_stats(
         FROM pulse_events
         WHERE site = $1
           AND day BETWEEN $2 AND $3
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (device IS NULL OR device = '')) OR device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (ua_family IS NULL OR ua_family = '')) OR ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (country IS NULL OR country = '')) OR country = $8)
+          AND ($9 IS NULL OR path = $9)
         GROUP BY value
         ORDER BY pv DESC
-        LIMIT $4
+        LIMIT $10
         "#,
     )
     .bind(site)
     .bind(from)
     .bind(to)
+    .bind(filters.device.as_deref())
+    .bind(filters.ua_family.as_deref())
+    .bind(filters.source_type.as_deref())
+    .bind(filters.ref_host.as_deref())
+    .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -259,6 +347,7 @@ pub async fn fetch_ref_host_stats(
     site: &str,
     from: NaiveDate,
     to: NaiveDate,
+    filters: &PulseFilters,
     limit: i64,
 ) -> Result<Vec<PulseDimStats>, AnalyticsRepoError> {
     let rows = sqlx::query_as::<_, PulseDimStats>(
@@ -270,14 +359,26 @@ pub async fn fetch_ref_host_stats(
         FROM pulse_events
         WHERE site = $1
           AND day BETWEEN $2 AND $3
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (device IS NULL OR device = '')) OR device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (ua_family IS NULL OR ua_family = '')) OR ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (country IS NULL OR country = '')) OR country = $8)
+          AND ($9 IS NULL OR path = $9)
         GROUP BY value
         ORDER BY pv DESC
-        LIMIT $4
+        LIMIT $10
         "#,
     )
     .bind(site)
     .bind(from)
     .bind(to)
+    .bind(filters.device.as_deref())
+    .bind(filters.ua_family.as_deref())
+    .bind(filters.source_type.as_deref())
+    .bind(filters.ref_host.as_deref())
+    .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -289,6 +390,7 @@ pub async fn fetch_country_stats(
     site: &str,
     from: NaiveDate,
     to: NaiveDate,
+    filters: &PulseFilters,
     limit: i64,
 ) -> Result<Vec<PulseDimStats>, AnalyticsRepoError> {
     let rows = sqlx::query_as::<_, PulseDimStats>(
@@ -300,14 +402,26 @@ pub async fn fetch_country_stats(
         FROM pulse_events
         WHERE site = $1
           AND day BETWEEN $2 AND $3
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (device IS NULL OR device = '')) OR device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (ua_family IS NULL OR ua_family = '')) OR ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (country IS NULL OR country = '')) OR country = $8)
+          AND ($9 IS NULL OR path = $9)
         GROUP BY value
         ORDER BY pv DESC
-        LIMIT $4
+        LIMIT $10
         "#,
     )
     .bind(site)
     .bind(from)
     .bind(to)
+    .bind(filters.device.as_deref())
+    .bind(filters.ua_family.as_deref())
+    .bind(filters.source_type.as_deref())
+    .bind(filters.ref_host.as_deref())
+    .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -319,6 +433,7 @@ pub async fn fetch_active_totals(
     site: &str,
     from: DateTime<Utc>,
     to: DateTime<Utc>,
+    filters: &PulseFilters,
 ) -> Result<PulseActiveTotals, AnalyticsRepoError> {
     let row = sqlx::query_as::<_, PulseActiveTotals>(
         r#"
@@ -327,17 +442,45 @@ pub async fn fetch_active_totals(
                 SELECT COUNT(*)::bigint
                 FROM pulse_events
                 WHERE site = $1 AND ts BETWEEN $2 AND $3
+                  AND ($4 IS NULL OR ($4 = 'unknown' AND (device IS NULL OR device = '')) OR device = $4)
+                  AND ($5 IS NULL OR ($5 = 'unknown' AND (ua_family IS NULL OR ua_family = '')) OR ua_family = $5)
+                  AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+                  AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+                  AND ($8 IS NULL OR ($8 = 'unknown' AND (country IS NULL OR country = '')) OR country = $8)
+                  AND ($9 IS NULL OR path = $9)
             ) AS pv,
             (
                 SELECT COUNT(*)::bigint
                 FROM pulse_visitors
                 WHERE site = $1 AND last_seen_ts BETWEEN $2 AND $3
+                  AND ($4 IS NULL OR ($4 = 'unknown' AND (last_device IS NULL OR last_device = '')) OR last_device = $4)
+                  AND ($5 IS NULL OR ($5 = 'unknown' AND (last_ua_family IS NULL OR last_ua_family = '')) OR last_ua_family = $5)
+                  AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+                  AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+                  AND ($8 IS NULL OR ($8 = 'unknown' AND (last_country IS NULL OR last_country = '')) OR last_country = $8)
+                  AND (
+                      $9 IS NULL
+                      OR EXISTS (
+                          SELECT 1
+                          FROM pulse_events
+                          WHERE pulse_events.site = $1
+                            AND pulse_events.user_stats_id = pulse_visitors.user_stats_id
+                            AND pulse_events.ts BETWEEN $2 AND $3
+                            AND pulse_events.path = $9
+                      )
+                  )
             ) AS uv
         "#,
     )
     .bind(site)
     .bind(from)
     .bind(to)
+    .bind(filters.device.as_deref())
+    .bind(filters.ua_family.as_deref())
+    .bind(filters.source_type.as_deref())
+    .bind(filters.ref_host.as_deref())
+    .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .fetch_one(pool)
     .await?;
     Ok(row)
@@ -348,6 +491,7 @@ pub async fn fetch_active_top_paths(
     site: &str,
     from: DateTime<Utc>,
     to: DateTime<Utc>,
+    filters: &PulseFilters,
     limit: i64,
 ) -> Result<Vec<PulseTopPath>, AnalyticsRepoError> {
     let rows = sqlx::query_as::<_, PulseTopPath>(
@@ -361,14 +505,26 @@ pub async fn fetch_active_top_paths(
           AND ts BETWEEN $2 AND $3
           AND path IS NOT NULL
           AND path <> ''
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (device IS NULL OR device = '')) OR device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (ua_family IS NULL OR ua_family = '')) OR ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (country IS NULL OR country = '')) OR country = $8)
+          AND ($9 IS NULL OR path = $9)
         GROUP BY path
         ORDER BY pv DESC
-        LIMIT $4
+        LIMIT $10
         "#,
     )
     .bind(site)
     .bind(from)
     .bind(to)
+    .bind(filters.device.as_deref())
+    .bind(filters.ua_family.as_deref())
+    .bind(filters.source_type.as_deref())
+    .bind(filters.ref_host.as_deref())
+    .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -380,6 +536,7 @@ pub async fn fetch_active_minute_uv(
     site: &str,
     from: DateTime<Utc>,
     to: DateTime<Utc>,
+    filters: &PulseFilters,
 ) -> Result<Vec<PulseActiveMinuteUv>, AnalyticsRepoError> {
     let rows = sqlx::query_as::<_, PulseActiveMinuteUv>(
         r#"
@@ -389,6 +546,22 @@ pub async fn fetch_active_minute_uv(
         FROM pulse_visitors
         WHERE site = $1
           AND last_seen_ts BETWEEN $2 AND $3
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (last_device IS NULL OR last_device = '')) OR last_device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (last_ua_family IS NULL OR last_ua_family = '')) OR last_ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (last_country IS NULL OR last_country = '')) OR last_country = $8)
+          AND (
+              $9 IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM pulse_events
+                  WHERE pulse_events.site = $1
+                    AND pulse_events.user_stats_id = pulse_visitors.user_stats_id
+                    AND pulse_events.ts BETWEEN $2 AND $3
+                    AND pulse_events.path = $9
+              )
+          )
         GROUP BY minute
         ORDER BY minute
         "#,
@@ -396,6 +569,12 @@ pub async fn fetch_active_minute_uv(
     .bind(site)
     .bind(from)
     .bind(to)
+    .bind(filters.device.as_deref())
+    .bind(filters.ua_family.as_deref())
+    .bind(filters.source_type.as_deref())
+    .bind(filters.ref_host.as_deref())
+    .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .fetch_all(pool)
     .await?;
     Ok(rows)
@@ -406,6 +585,7 @@ pub async fn fetch_active_device_counts(
     site: &str,
     from: DateTime<Utc>,
     to: DateTime<Utc>,
+    filters: &PulseFilters,
     limit: i64,
 ) -> Result<Vec<PulseDimCount>, AnalyticsRepoError> {
     let rows = sqlx::query_as::<_, PulseDimCount>(
@@ -416,14 +596,36 @@ pub async fn fetch_active_device_counts(
         FROM pulse_visitors
         WHERE site = $1
           AND last_seen_ts BETWEEN $2 AND $3
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (last_device IS NULL OR last_device = '')) OR last_device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (last_ua_family IS NULL OR last_ua_family = '')) OR last_ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (last_country IS NULL OR last_country = '')) OR last_country = $8)
+          AND (
+              $9 IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM pulse_events
+                  WHERE pulse_events.site = $1
+                    AND pulse_events.user_stats_id = pulse_visitors.user_stats_id
+                    AND pulse_events.ts BETWEEN $2 AND $3
+                    AND pulse_events.path = $9
+              )
+          )
         GROUP BY value
         ORDER BY count DESC
-        LIMIT $4
+        LIMIT $10
         "#,
     )
     .bind(site)
     .bind(from)
     .bind(to)
+    .bind(filters.device.as_deref())
+    .bind(filters.ua_family.as_deref())
+    .bind(filters.source_type.as_deref())
+    .bind(filters.ref_host.as_deref())
+    .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -435,6 +637,7 @@ pub async fn fetch_active_ua_counts(
     site: &str,
     from: DateTime<Utc>,
     to: DateTime<Utc>,
+    filters: &PulseFilters,
     limit: i64,
 ) -> Result<Vec<PulseDimCount>, AnalyticsRepoError> {
     let rows = sqlx::query_as::<_, PulseDimCount>(
@@ -445,14 +648,36 @@ pub async fn fetch_active_ua_counts(
         FROM pulse_visitors
         WHERE site = $1
           AND last_seen_ts BETWEEN $2 AND $3
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (last_device IS NULL OR last_device = '')) OR last_device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (last_ua_family IS NULL OR last_ua_family = '')) OR last_ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (last_country IS NULL OR last_country = '')) OR last_country = $8)
+          AND (
+              $9 IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM pulse_events
+                  WHERE pulse_events.site = $1
+                    AND pulse_events.user_stats_id = pulse_visitors.user_stats_id
+                    AND pulse_events.ts BETWEEN $2 AND $3
+                    AND pulse_events.path = $9
+              )
+          )
         GROUP BY value
         ORDER BY count DESC
-        LIMIT $4
+        LIMIT $10
         "#,
     )
     .bind(site)
     .bind(from)
     .bind(to)
+    .bind(filters.device.as_deref())
+    .bind(filters.ua_family.as_deref())
+    .bind(filters.source_type.as_deref())
+    .bind(filters.ref_host.as_deref())
+    .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -464,6 +689,7 @@ pub async fn fetch_active_source_counts(
     site: &str,
     from: DateTime<Utc>,
     to: DateTime<Utc>,
+    filters: &PulseFilters,
     limit: i64,
 ) -> Result<Vec<PulseDimCount>, AnalyticsRepoError> {
     let rows = sqlx::query_as::<_, PulseDimCount>(
@@ -476,14 +702,36 @@ pub async fn fetch_active_source_counts(
           AND last_seen_ts BETWEEN $2 AND $3
           AND entry_source_type IS NOT NULL
           AND entry_source_type <> ''
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (last_device IS NULL OR last_device = '')) OR last_device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (last_ua_family IS NULL OR last_ua_family = '')) OR last_ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (last_country IS NULL OR last_country = '')) OR last_country = $8)
+          AND (
+              $9 IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM pulse_events
+                  WHERE pulse_events.site = $1
+                    AND pulse_events.user_stats_id = pulse_visitors.user_stats_id
+                    AND pulse_events.ts BETWEEN $2 AND $3
+                    AND pulse_events.path = $9
+              )
+          )
         GROUP BY entry_source_type
         ORDER BY count DESC
-        LIMIT $4
+        LIMIT $10
         "#,
     )
     .bind(site)
     .bind(from)
     .bind(to)
+    .bind(filters.device.as_deref())
+    .bind(filters.ua_family.as_deref())
+    .bind(filters.source_type.as_deref())
+    .bind(filters.ref_host.as_deref())
+    .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -495,6 +743,7 @@ pub async fn fetch_active_ref_host_counts(
     site: &str,
     from: DateTime<Utc>,
     to: DateTime<Utc>,
+    filters: &PulseFilters,
     limit: i64,
 ) -> Result<Vec<PulseDimCount>, AnalyticsRepoError> {
     let rows = sqlx::query_as::<_, PulseDimCount>(
@@ -507,14 +756,36 @@ pub async fn fetch_active_ref_host_counts(
           AND last_seen_ts BETWEEN $2 AND $3
           AND entry_ref_host IS NOT NULL
           AND entry_ref_host <> ''
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (last_device IS NULL OR last_device = '')) OR last_device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (last_ua_family IS NULL OR last_ua_family = '')) OR last_ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (last_country IS NULL OR last_country = '')) OR last_country = $8)
+          AND (
+              $9 IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM pulse_events
+                  WHERE pulse_events.site = $1
+                    AND pulse_events.user_stats_id = pulse_visitors.user_stats_id
+                    AND pulse_events.ts BETWEEN $2 AND $3
+                    AND pulse_events.path = $9
+              )
+          )
         GROUP BY entry_ref_host
         ORDER BY count DESC
-        LIMIT $4
+        LIMIT $10
         "#,
     )
     .bind(site)
     .bind(from)
     .bind(to)
+    .bind(filters.device.as_deref())
+    .bind(filters.ua_family.as_deref())
+    .bind(filters.source_type.as_deref())
+    .bind(filters.ref_host.as_deref())
+    .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -526,6 +797,7 @@ pub async fn fetch_active_country_counts(
     site: &str,
     from: DateTime<Utc>,
     to: DateTime<Utc>,
+    filters: &PulseFilters,
     limit: i64,
 ) -> Result<Vec<PulseDimCount>, AnalyticsRepoError> {
     let rows = sqlx::query_as::<_, PulseDimCount>(
@@ -536,14 +808,36 @@ pub async fn fetch_active_country_counts(
         FROM pulse_visitors
         WHERE site = $1
           AND last_seen_ts BETWEEN $2 AND $3
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (last_device IS NULL OR last_device = '')) OR last_device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (last_ua_family IS NULL OR last_ua_family = '')) OR last_ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (last_country IS NULL OR last_country = '')) OR last_country = $8)
+          AND (
+              $9 IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM pulse_events
+                  WHERE pulse_events.site = $1
+                    AND pulse_events.user_stats_id = pulse_visitors.user_stats_id
+                    AND pulse_events.ts BETWEEN $2 AND $3
+                    AND pulse_events.path = $9
+              )
+          )
         GROUP BY value
         ORDER BY count DESC
-        LIMIT $4
+        LIMIT $10
         "#,
     )
     .bind(site)
     .bind(from)
     .bind(to)
+    .bind(filters.device.as_deref())
+    .bind(filters.ua_family.as_deref())
+    .bind(filters.source_type.as_deref())
+    .bind(filters.ref_host.as_deref())
+    .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .bind(limit)
     .fetch_all(pool)
     .await?;

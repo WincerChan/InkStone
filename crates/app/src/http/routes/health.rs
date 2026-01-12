@@ -156,6 +156,7 @@ mod tests {
             douban_user_agent: "ua".to_string(),
             cookie_secret: Some("cookie".to_string()),
             stats_secret: Some("stats".to_string()),
+            search_hash_secret: None,
             valid_paths_url: "https://example.com/paths.txt".to_string(),
             kudos_flush_interval: Duration::seconds(60).to_std().unwrap(),
             github_webhook_secret: None,
