@@ -22,6 +22,7 @@ const DEFAULT_TOP_LIMIT: i64 = 20;
 const MAX_TOP_LIMIT: i64 = 200;
 const MAX_SITE_LEN: usize = 255;
 const MAX_FILTER_LEN: usize = 255;
+const MAX_PATH_LEN: usize = 512;
 
 #[derive(Debug, Deserialize)]
 pub struct PulseSiteQuery {
@@ -34,6 +35,7 @@ pub struct PulseSiteQuery {
     pub source_type: Option<String>,
     pub ref_host: Option<String>,
     pub country: Option<String>,
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -46,6 +48,7 @@ pub struct PulseActiveQuery {
     pub source_type: Option<String>,
     pub ref_host: Option<String>,
     pub country: Option<String>,
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -57,6 +60,7 @@ pub struct PulseActiveSummaryQuery {
     pub source_type: Option<String>,
     pub ref_host: Option<String>,
     pub country: Option<String>,
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -65,6 +69,8 @@ pub enum PulseAdminError {
     MissingSite,
     #[error("site is invalid")]
     InvalidSite,
+    #[error("path is invalid")]
+    InvalidPath,
     #[error("device is invalid")]
     InvalidDevice,
     #[error("ua_family is invalid")]
@@ -222,6 +228,7 @@ pub async fn get_pulse_site(
         query.source_type.as_deref(),
         query.ref_host.as_deref(),
         query.country.as_deref(),
+        query.path.as_deref(),
     )?;
     let pool = state.db.as_ref().ok_or(PulseAdminError::DbUnavailable)?.clone();
 
@@ -267,6 +274,7 @@ pub async fn get_pulse_active(
         query.source_type.as_deref(),
         query.ref_host.as_deref(),
         query.country.as_deref(),
+        query.path.as_deref(),
     )?;
     let pool = state.db.as_ref().ok_or(PulseAdminError::DbUnavailable)?.clone();
     let (from, to) = active_range(minutes);
@@ -312,6 +320,7 @@ pub async fn get_pulse_active_summary(
         query.source_type.as_deref(),
         query.ref_host.as_deref(),
         query.country.as_deref(),
+        query.path.as_deref(),
     )?;
     let pool = state.db.as_ref().ok_or(PulseAdminError::DbUnavailable)?.clone();
     let (from, to) = active_range(minutes);
@@ -438,6 +447,7 @@ fn parse_filters(
     source_type: Option<&str>,
     ref_host: Option<&str>,
     country: Option<&str>,
+    path: Option<&str>,
 ) -> Result<PulseFilters, PulseAdminError> {
     Ok(PulseFilters {
         device: normalize_filter_value(device, PulseAdminError::InvalidDevice)?,
@@ -445,6 +455,7 @@ fn parse_filters(
         source_type: normalize_filter_value(source_type, PulseAdminError::InvalidSourceType)?,
         ref_host: normalize_ref_host_filter(ref_host)?,
         country: normalize_filter_value(country, PulseAdminError::InvalidCountry)?,
+        path: normalize_path_filter(path)?,
     })
 }
 
@@ -483,6 +494,21 @@ fn normalize_ref_host_filter(value: Option<&str>) -> Result<Option<String>, Puls
         return Err(PulseAdminError::InvalidRefHost);
     }
     Ok(Some(host))
+}
+
+fn normalize_path_filter(value: Option<&str>) -> Result<Option<String>, PulseAdminError> {
+    let trimmed = match value {
+        Some(raw) => raw.trim(),
+        None => return Ok(None),
+    };
+    if trimmed.is_empty()
+        || trimmed.len() > MAX_PATH_LEN
+        || !trimmed.starts_with('/')
+        || trimmed.chars().any(|ch| ch.is_whitespace())
+    {
+        return Err(PulseAdminError::InvalidPath);
+    }
+    Ok(Some(trimmed.to_string()))
 }
 
 fn parse_ref_host(value: &str) -> Option<String> {
@@ -534,6 +560,7 @@ impl IntoResponse for PulseAdminError {
         let (status, message) = match &self {
             PulseAdminError::MissingSite
             | PulseAdminError::InvalidSite
+            | PulseAdminError::InvalidPath
             | PulseAdminError::InvalidDevice
             | PulseAdminError::InvalidUaFamily
             | PulseAdminError::InvalidSourceType
@@ -553,8 +580,8 @@ impl IntoResponse for PulseAdminError {
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_filter_value, normalize_ref_host_filter, normalize_site_param,
-        parse_active_minutes, parse_date, parse_range, PulseAdminError,
+        normalize_filter_value, normalize_path_filter, normalize_ref_host_filter,
+        normalize_site_param, parse_active_minutes, parse_date, parse_range, PulseAdminError,
     };
 
     #[test]
@@ -605,5 +632,16 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(value, "Example.COM");
+    }
+
+    #[test]
+    fn normalize_path_filter_accepts_basic() {
+        let value = normalize_path_filter(Some("/posts/hello/")).unwrap().unwrap();
+        assert_eq!(value, "/posts/hello/");
+    }
+
+    #[test]
+    fn normalize_path_filter_rejects_missing_slash() {
+        assert!(normalize_path_filter(Some("posts/hello")).is_err());
     }
 }

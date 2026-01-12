@@ -10,6 +10,7 @@ pub struct PulseFilters {
     pub source_type: Option<String>,
     pub ref_host: Option<String>,
     pub country: Option<String>,
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -109,6 +110,7 @@ pub async fn fetch_totals(
           AND ($6 IS NULL OR entry_source_type = $6)
           AND ($7 IS NULL OR entry_ref_host = $7)
           AND ($8 IS NULL OR country = $8)
+          AND ($9 IS NULL OR path = $9)
         "#,
     )
     .bind(site)
@@ -119,6 +121,7 @@ pub async fn fetch_totals(
     .bind(filters.source_type.as_deref())
     .bind(filters.ref_host.as_deref())
     .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .fetch_one(pool)
     .await?;
     Ok(row)
@@ -146,6 +149,7 @@ pub async fn fetch_daily(
           AND ($6 IS NULL OR entry_source_type = $6)
           AND ($7 IS NULL OR entry_ref_host = $7)
           AND ($8 IS NULL OR country = $8)
+          AND ($9 IS NULL OR path = $9)
         GROUP BY day
         ORDER BY day
         "#,
@@ -158,6 +162,7 @@ pub async fn fetch_daily(
     .bind(filters.source_type.as_deref())
     .bind(filters.ref_host.as_deref())
     .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .fetch_all(pool)
     .await?;
     Ok(rows)
@@ -187,9 +192,10 @@ pub async fn fetch_top_paths(
           AND ($6 IS NULL OR entry_source_type = $6)
           AND ($7 IS NULL OR entry_ref_host = $7)
           AND ($8 IS NULL OR country = $8)
+          AND ($9 IS NULL OR path = $9)
         GROUP BY path
         ORDER BY pv DESC
-        LIMIT $9
+        LIMIT $10
         "#,
     )
     .bind(site)
@@ -200,6 +206,7 @@ pub async fn fetch_top_paths(
     .bind(filters.source_type.as_deref())
     .bind(filters.ref_host.as_deref())
     .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -228,9 +235,10 @@ pub async fn fetch_device_stats(
           AND ($6 IS NULL OR entry_source_type = $6)
           AND ($7 IS NULL OR entry_ref_host = $7)
           AND ($8 IS NULL OR country = $8)
+          AND ($9 IS NULL OR path = $9)
         GROUP BY value
         ORDER BY pv DESC
-        LIMIT $9
+        LIMIT $10
         "#,
     )
     .bind(site)
@@ -241,6 +249,7 @@ pub async fn fetch_device_stats(
     .bind(filters.source_type.as_deref())
     .bind(filters.ref_host.as_deref())
     .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -269,9 +278,10 @@ pub async fn fetch_ua_stats(
           AND ($6 IS NULL OR entry_source_type = $6)
           AND ($7 IS NULL OR entry_ref_host = $7)
           AND ($8 IS NULL OR country = $8)
+          AND ($9 IS NULL OR path = $9)
         GROUP BY value
         ORDER BY pv DESC
-        LIMIT $9
+        LIMIT $10
         "#,
     )
     .bind(site)
@@ -282,6 +292,7 @@ pub async fn fetch_ua_stats(
     .bind(filters.source_type.as_deref())
     .bind(filters.ref_host.as_deref())
     .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -310,9 +321,10 @@ pub async fn fetch_source_stats(
           AND ($6 IS NULL OR entry_source_type = $6)
           AND ($7 IS NULL OR entry_ref_host = $7)
           AND ($8 IS NULL OR country = $8)
+          AND ($9 IS NULL OR path = $9)
         GROUP BY value
         ORDER BY pv DESC
-        LIMIT $9
+        LIMIT $10
         "#,
     )
     .bind(site)
@@ -323,6 +335,7 @@ pub async fn fetch_source_stats(
     .bind(filters.source_type.as_deref())
     .bind(filters.ref_host.as_deref())
     .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -351,9 +364,10 @@ pub async fn fetch_ref_host_stats(
           AND ($6 IS NULL OR entry_source_type = $6)
           AND ($7 IS NULL OR entry_ref_host = $7)
           AND ($8 IS NULL OR country = $8)
+          AND ($9 IS NULL OR path = $9)
         GROUP BY value
         ORDER BY pv DESC
-        LIMIT $9
+        LIMIT $10
         "#,
     )
     .bind(site)
@@ -364,6 +378,7 @@ pub async fn fetch_ref_host_stats(
     .bind(filters.source_type.as_deref())
     .bind(filters.ref_host.as_deref())
     .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -392,9 +407,10 @@ pub async fn fetch_country_stats(
           AND ($6 IS NULL OR entry_source_type = $6)
           AND ($7 IS NULL OR entry_ref_host = $7)
           AND ($8 IS NULL OR country = $8)
+          AND ($9 IS NULL OR path = $9)
         GROUP BY value
         ORDER BY pv DESC
-        LIMIT $9
+        LIMIT $10
         "#,
     )
     .bind(site)
@@ -405,6 +421,7 @@ pub async fn fetch_country_stats(
     .bind(filters.source_type.as_deref())
     .bind(filters.ref_host.as_deref())
     .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -430,6 +447,7 @@ pub async fn fetch_active_totals(
                   AND ($6 IS NULL OR entry_source_type = $6)
                   AND ($7 IS NULL OR entry_ref_host = $7)
                   AND ($8 IS NULL OR country = $8)
+                  AND ($9 IS NULL OR path = $9)
             ) AS pv,
             (
                 SELECT COUNT(*)::bigint
@@ -440,6 +458,17 @@ pub async fn fetch_active_totals(
                   AND ($6 IS NULL OR entry_source_type = $6)
                   AND ($7 IS NULL OR entry_ref_host = $7)
                   AND ($8 IS NULL OR last_country = $8)
+                  AND (
+                      $9 IS NULL
+                      OR EXISTS (
+                          SELECT 1
+                          FROM pulse_events
+                          WHERE pulse_events.site = $1
+                            AND pulse_events.user_stats_id = pulse_visitors.user_stats_id
+                            AND pulse_events.ts BETWEEN $2 AND $3
+                            AND pulse_events.path = $9
+                      )
+                  )
             ) AS uv
         "#,
     )
@@ -451,6 +480,7 @@ pub async fn fetch_active_totals(
     .bind(filters.source_type.as_deref())
     .bind(filters.ref_host.as_deref())
     .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .fetch_one(pool)
     .await?;
     Ok(row)
@@ -480,9 +510,10 @@ pub async fn fetch_active_top_paths(
           AND ($6 IS NULL OR entry_source_type = $6)
           AND ($7 IS NULL OR entry_ref_host = $7)
           AND ($8 IS NULL OR country = $8)
+          AND ($9 IS NULL OR path = $9)
         GROUP BY path
         ORDER BY pv DESC
-        LIMIT $9
+        LIMIT $10
         "#,
     )
     .bind(site)
@@ -493,6 +524,7 @@ pub async fn fetch_active_top_paths(
     .bind(filters.source_type.as_deref())
     .bind(filters.ref_host.as_deref())
     .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -519,6 +551,17 @@ pub async fn fetch_active_minute_uv(
           AND ($6 IS NULL OR entry_source_type = $6)
           AND ($7 IS NULL OR entry_ref_host = $7)
           AND ($8 IS NULL OR last_country = $8)
+          AND (
+              $9 IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM pulse_events
+                  WHERE pulse_events.site = $1
+                    AND pulse_events.user_stats_id = pulse_visitors.user_stats_id
+                    AND pulse_events.ts BETWEEN $2 AND $3
+                    AND pulse_events.path = $9
+              )
+          )
         GROUP BY minute
         ORDER BY minute
         "#,
@@ -531,6 +574,7 @@ pub async fn fetch_active_minute_uv(
     .bind(filters.source_type.as_deref())
     .bind(filters.ref_host.as_deref())
     .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .fetch_all(pool)
     .await?;
     Ok(rows)
@@ -557,9 +601,20 @@ pub async fn fetch_active_device_counts(
           AND ($6 IS NULL OR entry_source_type = $6)
           AND ($7 IS NULL OR entry_ref_host = $7)
           AND ($8 IS NULL OR last_country = $8)
+          AND (
+              $9 IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM pulse_events
+                  WHERE pulse_events.site = $1
+                    AND pulse_events.user_stats_id = pulse_visitors.user_stats_id
+                    AND pulse_events.ts BETWEEN $2 AND $3
+                    AND pulse_events.path = $9
+              )
+          )
         GROUP BY value
         ORDER BY count DESC
-        LIMIT $9
+        LIMIT $10
         "#,
     )
     .bind(site)
@@ -570,6 +625,7 @@ pub async fn fetch_active_device_counts(
     .bind(filters.source_type.as_deref())
     .bind(filters.ref_host.as_deref())
     .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -597,9 +653,20 @@ pub async fn fetch_active_ua_counts(
           AND ($6 IS NULL OR entry_source_type = $6)
           AND ($7 IS NULL OR entry_ref_host = $7)
           AND ($8 IS NULL OR last_country = $8)
+          AND (
+              $9 IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM pulse_events
+                  WHERE pulse_events.site = $1
+                    AND pulse_events.user_stats_id = pulse_visitors.user_stats_id
+                    AND pulse_events.ts BETWEEN $2 AND $3
+                    AND pulse_events.path = $9
+              )
+          )
         GROUP BY value
         ORDER BY count DESC
-        LIMIT $9
+        LIMIT $10
         "#,
     )
     .bind(site)
@@ -610,6 +677,7 @@ pub async fn fetch_active_ua_counts(
     .bind(filters.source_type.as_deref())
     .bind(filters.ref_host.as_deref())
     .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -639,9 +707,20 @@ pub async fn fetch_active_source_counts(
           AND ($6 IS NULL OR entry_source_type = $6)
           AND ($7 IS NULL OR entry_ref_host = $7)
           AND ($8 IS NULL OR last_country = $8)
+          AND (
+              $9 IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM pulse_events
+                  WHERE pulse_events.site = $1
+                    AND pulse_events.user_stats_id = pulse_visitors.user_stats_id
+                    AND pulse_events.ts BETWEEN $2 AND $3
+                    AND pulse_events.path = $9
+              )
+          )
         GROUP BY entry_source_type
         ORDER BY count DESC
-        LIMIT $9
+        LIMIT $10
         "#,
     )
     .bind(site)
@@ -652,6 +731,7 @@ pub async fn fetch_active_source_counts(
     .bind(filters.source_type.as_deref())
     .bind(filters.ref_host.as_deref())
     .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -681,9 +761,20 @@ pub async fn fetch_active_ref_host_counts(
           AND ($6 IS NULL OR entry_source_type = $6)
           AND ($7 IS NULL OR entry_ref_host = $7)
           AND ($8 IS NULL OR last_country = $8)
+          AND (
+              $9 IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM pulse_events
+                  WHERE pulse_events.site = $1
+                    AND pulse_events.user_stats_id = pulse_visitors.user_stats_id
+                    AND pulse_events.ts BETWEEN $2 AND $3
+                    AND pulse_events.path = $9
+              )
+          )
         GROUP BY entry_ref_host
         ORDER BY count DESC
-        LIMIT $9
+        LIMIT $10
         "#,
     )
     .bind(site)
@@ -694,6 +785,7 @@ pub async fn fetch_active_ref_host_counts(
     .bind(filters.source_type.as_deref())
     .bind(filters.ref_host.as_deref())
     .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .bind(limit)
     .fetch_all(pool)
     .await?;
@@ -721,9 +813,20 @@ pub async fn fetch_active_country_counts(
           AND ($6 IS NULL OR entry_source_type = $6)
           AND ($7 IS NULL OR entry_ref_host = $7)
           AND ($8 IS NULL OR last_country = $8)
+          AND (
+              $9 IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM pulse_events
+                  WHERE pulse_events.site = $1
+                    AND pulse_events.user_stats_id = pulse_visitors.user_stats_id
+                    AND pulse_events.ts BETWEEN $2 AND $3
+                    AND pulse_events.path = $9
+              )
+          )
         GROUP BY value
         ORDER BY count DESC
-        LIMIT $9
+        LIMIT $10
         "#,
     )
     .bind(site)
@@ -734,6 +837,7 @@ pub async fn fetch_active_country_counts(
     .bind(filters.source_type.as_deref())
     .bind(filters.ref_host.as_deref())
     .bind(filters.country.as_deref())
+    .bind(filters.path.as_deref())
     .bind(limit)
     .fetch_all(pool)
     .await?;
