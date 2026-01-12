@@ -105,11 +105,11 @@ pub async fn fetch_totals(
             COALESCE(SUM(duration_ms), 0)::bigint AS total_duration_ms
         FROM pulse_events
         WHERE site = $1 AND day BETWEEN $2 AND $3
-          AND ($4 IS NULL OR device = $4)
-          AND ($5 IS NULL OR ua_family = $5)
-          AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR entry_ref_host = $7)
-          AND ($8 IS NULL OR country = $8)
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (device IS NULL OR device = '')) OR device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (ua_family IS NULL OR ua_family = '')) OR ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (country IS NULL OR country = '')) OR country = $8)
           AND ($9 IS NULL OR path = $9)
         "#,
     )
@@ -144,11 +144,11 @@ pub async fn fetch_daily(
             COALESCE(SUM(duration_ms), 0)::bigint AS total_duration_ms
         FROM pulse_events
         WHERE site = $1 AND day BETWEEN $2 AND $3
-          AND ($4 IS NULL OR device = $4)
-          AND ($5 IS NULL OR ua_family = $5)
-          AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR entry_ref_host = $7)
-          AND ($8 IS NULL OR country = $8)
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (device IS NULL OR device = '')) OR device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (ua_family IS NULL OR ua_family = '')) OR ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (country IS NULL OR country = '')) OR country = $8)
           AND ($9 IS NULL OR path = $9)
         GROUP BY day
         ORDER BY day
@@ -187,11 +187,11 @@ pub async fn fetch_top_paths(
           AND day BETWEEN $2 AND $3
           AND path IS NOT NULL
           AND path <> ''
-          AND ($4 IS NULL OR device = $4)
-          AND ($5 IS NULL OR ua_family = $5)
-          AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR entry_ref_host = $7)
-          AND ($8 IS NULL OR country = $8)
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (device IS NULL OR device = '')) OR device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (ua_family IS NULL OR ua_family = '')) OR ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (country IS NULL OR country = '')) OR country = $8)
           AND ($9 IS NULL OR path = $9)
         GROUP BY path
         ORDER BY pv DESC
@@ -230,11 +230,11 @@ pub async fn fetch_device_stats(
         FROM pulse_events
         WHERE site = $1
           AND day BETWEEN $2 AND $3
-          AND ($4 IS NULL OR device = $4)
-          AND ($5 IS NULL OR ua_family = $5)
-          AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR entry_ref_host = $7)
-          AND ($8 IS NULL OR country = $8)
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (device IS NULL OR device = '')) OR device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (ua_family IS NULL OR ua_family = '')) OR ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (country IS NULL OR country = '')) OR country = $8)
           AND ($9 IS NULL OR path = $9)
         GROUP BY value
         ORDER BY pv DESC
@@ -273,11 +273,11 @@ pub async fn fetch_ua_stats(
         FROM pulse_events
         WHERE site = $1
           AND day BETWEEN $2 AND $3
-          AND ($4 IS NULL OR device = $4)
-          AND ($5 IS NULL OR ua_family = $5)
-          AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR entry_ref_host = $7)
-          AND ($8 IS NULL OR country = $8)
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (device IS NULL OR device = '')) OR device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (ua_family IS NULL OR ua_family = '')) OR ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (country IS NULL OR country = '')) OR country = $8)
           AND ($9 IS NULL OR path = $9)
         GROUP BY value
         ORDER BY pv DESC
@@ -316,11 +316,11 @@ pub async fn fetch_source_stats(
         FROM pulse_events
         WHERE site = $1
           AND day BETWEEN $2 AND $3
-          AND ($4 IS NULL OR device = $4)
-          AND ($5 IS NULL OR ua_family = $5)
-          AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR entry_ref_host = $7)
-          AND ($8 IS NULL OR country = $8)
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (device IS NULL OR device = '')) OR device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (ua_family IS NULL OR ua_family = '')) OR ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (country IS NULL OR country = '')) OR country = $8)
           AND ($9 IS NULL OR path = $9)
         GROUP BY value
         ORDER BY pv DESC
@@ -359,11 +359,11 @@ pub async fn fetch_ref_host_stats(
         FROM pulse_events
         WHERE site = $1
           AND day BETWEEN $2 AND $3
-          AND ($4 IS NULL OR device = $4)
-          AND ($5 IS NULL OR ua_family = $5)
-          AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR entry_ref_host = $7)
-          AND ($8 IS NULL OR country = $8)
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (device IS NULL OR device = '')) OR device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (ua_family IS NULL OR ua_family = '')) OR ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (country IS NULL OR country = '')) OR country = $8)
           AND ($9 IS NULL OR path = $9)
         GROUP BY value
         ORDER BY pv DESC
@@ -402,11 +402,11 @@ pub async fn fetch_country_stats(
         FROM pulse_events
         WHERE site = $1
           AND day BETWEEN $2 AND $3
-          AND ($4 IS NULL OR device = $4)
-          AND ($5 IS NULL OR ua_family = $5)
-          AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR entry_ref_host = $7)
-          AND ($8 IS NULL OR country = $8)
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (device IS NULL OR device = '')) OR device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (ua_family IS NULL OR ua_family = '')) OR ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (country IS NULL OR country = '')) OR country = $8)
           AND ($9 IS NULL OR path = $9)
         GROUP BY value
         ORDER BY pv DESC
@@ -442,22 +442,22 @@ pub async fn fetch_active_totals(
                 SELECT COUNT(*)::bigint
                 FROM pulse_events
                 WHERE site = $1 AND ts BETWEEN $2 AND $3
-                  AND ($4 IS NULL OR device = $4)
-                  AND ($5 IS NULL OR ua_family = $5)
-                  AND ($6 IS NULL OR entry_source_type = $6)
-                  AND ($7 IS NULL OR entry_ref_host = $7)
-                  AND ($8 IS NULL OR country = $8)
+                  AND ($4 IS NULL OR ($4 = 'unknown' AND (device IS NULL OR device = '')) OR device = $4)
+                  AND ($5 IS NULL OR ($5 = 'unknown' AND (ua_family IS NULL OR ua_family = '')) OR ua_family = $5)
+                  AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+                  AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+                  AND ($8 IS NULL OR ($8 = 'unknown' AND (country IS NULL OR country = '')) OR country = $8)
                   AND ($9 IS NULL OR path = $9)
             ) AS pv,
             (
                 SELECT COUNT(*)::bigint
                 FROM pulse_visitors
                 WHERE site = $1 AND last_seen_ts BETWEEN $2 AND $3
-                  AND ($4 IS NULL OR last_device = $4)
-                  AND ($5 IS NULL OR last_ua_family = $5)
-                  AND ($6 IS NULL OR entry_source_type = $6)
-                  AND ($7 IS NULL OR entry_ref_host = $7)
-                  AND ($8 IS NULL OR last_country = $8)
+                  AND ($4 IS NULL OR ($4 = 'unknown' AND (last_device IS NULL OR last_device = '')) OR last_device = $4)
+                  AND ($5 IS NULL OR ($5 = 'unknown' AND (last_ua_family IS NULL OR last_ua_family = '')) OR last_ua_family = $5)
+                  AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+                  AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+                  AND ($8 IS NULL OR ($8 = 'unknown' AND (last_country IS NULL OR last_country = '')) OR last_country = $8)
                   AND (
                       $9 IS NULL
                       OR EXISTS (
@@ -505,11 +505,11 @@ pub async fn fetch_active_top_paths(
           AND ts BETWEEN $2 AND $3
           AND path IS NOT NULL
           AND path <> ''
-          AND ($4 IS NULL OR device = $4)
-          AND ($5 IS NULL OR ua_family = $5)
-          AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR entry_ref_host = $7)
-          AND ($8 IS NULL OR country = $8)
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (device IS NULL OR device = '')) OR device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (ua_family IS NULL OR ua_family = '')) OR ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (country IS NULL OR country = '')) OR country = $8)
           AND ($9 IS NULL OR path = $9)
         GROUP BY path
         ORDER BY pv DESC
@@ -546,11 +546,11 @@ pub async fn fetch_active_minute_uv(
         FROM pulse_visitors
         WHERE site = $1
           AND last_seen_ts BETWEEN $2 AND $3
-          AND ($4 IS NULL OR last_device = $4)
-          AND ($5 IS NULL OR last_ua_family = $5)
-          AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR entry_ref_host = $7)
-          AND ($8 IS NULL OR last_country = $8)
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (last_device IS NULL OR last_device = '')) OR last_device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (last_ua_family IS NULL OR last_ua_family = '')) OR last_ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (last_country IS NULL OR last_country = '')) OR last_country = $8)
           AND (
               $9 IS NULL
               OR EXISTS (
@@ -596,11 +596,11 @@ pub async fn fetch_active_device_counts(
         FROM pulse_visitors
         WHERE site = $1
           AND last_seen_ts BETWEEN $2 AND $3
-          AND ($4 IS NULL OR last_device = $4)
-          AND ($5 IS NULL OR last_ua_family = $5)
-          AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR entry_ref_host = $7)
-          AND ($8 IS NULL OR last_country = $8)
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (last_device IS NULL OR last_device = '')) OR last_device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (last_ua_family IS NULL OR last_ua_family = '')) OR last_ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (last_country IS NULL OR last_country = '')) OR last_country = $8)
           AND (
               $9 IS NULL
               OR EXISTS (
@@ -648,11 +648,11 @@ pub async fn fetch_active_ua_counts(
         FROM pulse_visitors
         WHERE site = $1
           AND last_seen_ts BETWEEN $2 AND $3
-          AND ($4 IS NULL OR last_device = $4)
-          AND ($5 IS NULL OR last_ua_family = $5)
-          AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR entry_ref_host = $7)
-          AND ($8 IS NULL OR last_country = $8)
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (last_device IS NULL OR last_device = '')) OR last_device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (last_ua_family IS NULL OR last_ua_family = '')) OR last_ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (last_country IS NULL OR last_country = '')) OR last_country = $8)
           AND (
               $9 IS NULL
               OR EXISTS (
@@ -702,11 +702,11 @@ pub async fn fetch_active_source_counts(
           AND last_seen_ts BETWEEN $2 AND $3
           AND entry_source_type IS NOT NULL
           AND entry_source_type <> ''
-          AND ($4 IS NULL OR last_device = $4)
-          AND ($5 IS NULL OR last_ua_family = $5)
-          AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR entry_ref_host = $7)
-          AND ($8 IS NULL OR last_country = $8)
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (last_device IS NULL OR last_device = '')) OR last_device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (last_ua_family IS NULL OR last_ua_family = '')) OR last_ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (last_country IS NULL OR last_country = '')) OR last_country = $8)
           AND (
               $9 IS NULL
               OR EXISTS (
@@ -756,11 +756,11 @@ pub async fn fetch_active_ref_host_counts(
           AND last_seen_ts BETWEEN $2 AND $3
           AND entry_ref_host IS NOT NULL
           AND entry_ref_host <> ''
-          AND ($4 IS NULL OR last_device = $4)
-          AND ($5 IS NULL OR last_ua_family = $5)
-          AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR entry_ref_host = $7)
-          AND ($8 IS NULL OR last_country = $8)
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (last_device IS NULL OR last_device = '')) OR last_device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (last_ua_family IS NULL OR last_ua_family = '')) OR last_ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (last_country IS NULL OR last_country = '')) OR last_country = $8)
           AND (
               $9 IS NULL
               OR EXISTS (
@@ -808,11 +808,11 @@ pub async fn fetch_active_country_counts(
         FROM pulse_visitors
         WHERE site = $1
           AND last_seen_ts BETWEEN $2 AND $3
-          AND ($4 IS NULL OR last_device = $4)
-          AND ($5 IS NULL OR last_ua_family = $5)
-          AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR entry_ref_host = $7)
-          AND ($8 IS NULL OR last_country = $8)
+          AND ($4 IS NULL OR ($4 = 'unknown' AND (last_device IS NULL OR last_device = '')) OR last_device = $4)
+          AND ($5 IS NULL OR ($5 = 'unknown' AND (last_ua_family IS NULL OR last_ua_family = '')) OR last_ua_family = $5)
+          AND ($6 IS NULL OR ($6 = 'unknown' AND (entry_source_type IS NULL OR entry_source_type = '')) OR entry_source_type = $6)
+          AND ($7 IS NULL OR ($7 = 'unknown' AND (entry_ref_host IS NULL OR entry_ref_host = '')) OR entry_ref_host = $7)
+          AND ($8 IS NULL OR ($8 = 'unknown' AND (last_country IS NULL OR last_country = '')) OR last_country = $8)
           AND (
               $9 IS NULL
               OR EXISTS (
