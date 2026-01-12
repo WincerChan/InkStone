@@ -23,17 +23,12 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tower-http = { version = "0.6", features = ["cors"] }
 uuid = { version = "1", features = ["serde"] }
-tikv-jemalloc-ctl = { version = "0.6", optional = true }
-tikv-jemallocator = { version = "0.6", optional = true }
+tikv-jemalloc-ctl = { version = "0.6", optional = true, features = ["profiling"] }
+tikv-jemallocator = { version = "0.6", optional = true, features = ["profiling"] }
 
 inkstone-core = { path = "../core" }
 inkstone-infra = { path = "../infra" }
 
 [features]
 default = []
-jemalloc = [
-    "dep:tikv-jemalloc-ctl",
-    "dep:tikv-jemallocator",
-    "tikv-jemalloc-ctl/profiling",
-    "tikv-jemallocator/profiling",
-]
+jemalloc = ["dep:tikv-jemalloc-ctl", "dep:tikv-jemallocator"]

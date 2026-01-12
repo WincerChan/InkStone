@@ -21,8 +21,7 @@ WORKDIR /var/lib/inkstone
 COPY --from=builder /app/target/release/inkstone-app /usr/local/bin/inkstone-app
 
 ENV INKSTONE_HTTP_ADDR=0.0.0.0:8080 \
-    INKSTONE_INDEX_DIR=/data/index \
-    MALLOC_CONF=prof:true,prof_active:true
+    INKSTONE_INDEX_DIR=/data/index
 
 VOLUME ["/data"]
 

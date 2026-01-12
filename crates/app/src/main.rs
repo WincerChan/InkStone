@@ -23,6 +23,20 @@ use inkstone_infra::db::run_migrations;
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
+#[cfg(feature = "jemalloc")]
+#[allow(non_upper_case_globals)]
+#[unsafe(export_name = "_rjem_malloc_conf")]
+pub static malloc_conf: Option<&'static std::ffi::c_char> = Some(unsafe {
+    union Conf {
+        bytes: &'static u8,
+        ptr: &'static std::ffi::c_char,
+    }
+    Conf {
+        bytes: &b"prof:true,prof_active:true\0"[0],
+    }
+    .ptr
+});
+
 #[derive(Debug, Error)]
 pub enum AppError {
     #[error("config error: {0}")]
