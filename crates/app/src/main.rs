@@ -3,6 +3,7 @@ mod config;
 mod http;
 mod jobs;
 mod kudos_cache;
+mod mem_probe;
 mod state;
 mod wiring;
 
@@ -17,6 +18,10 @@ use crate::http::HttpError;
 use crate::jobs::JobError;
 use crate::wiring::WiringError;
 use inkstone_infra::db::run_migrations;
+
+#[cfg(feature = "jemalloc")]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[derive(Debug, Error)]
 pub enum AppError {

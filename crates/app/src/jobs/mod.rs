@@ -1,9 +1,12 @@
 pub mod scheduler;
 pub mod tasks;
 
+use std::time::Duration;
+
 use thiserror::Error;
 use tracing::{info, warn};
 
+use crate::mem_probe;
 use crate::state::AppState;
 
 #[derive(Debug, Error)]
@@ -28,18 +31,26 @@ pub enum JobError {
     Io(#[from] std::io::Error),
 }
 
+const HEAP_DUMP_INTERVAL: Duration = Duration::from_secs(10 * 60);
+
 pub async fn start(state: AppState, rebuild: bool) -> Result<(), JobError> {
     if rebuild {
         info!("running content refresh rebuild before scheduler");
+        mem_probe::record("content_refresh_rebuild", "before");
         let stats = tasks::content_refresh::run(&state, true, true).await?;
+        mem_probe::record("content_refresh_rebuild", "after");
         info!(?stats, "content refresh rebuild complete");
         info!("running douban crawl rebuild before scheduler");
+        mem_probe::record("douban_crawl_rebuild", "before");
         tasks::douban_crawl::run(&state, true).await?;
+        mem_probe::record("douban_crawl_rebuild", "after");
         if state.db.is_some() && tasks::comments_sync::is_enabled(&state.config) {
+            mem_probe::record("comments_sync_rebuild", "before");
             match tasks::comments_sync::run(&state, true).await {
                 Ok(stats) => info!(?stats, "comments sync rebuild complete"),
                 Err(err) => warn!(error = %err, "comments sync rebuild failed"),
             }
+            mem_probe::record("comments_sync_rebuild", "after");
         }
     }
 
@@ -48,10 +59,12 @@ pub async fn start(state: AppState, rebuild: bool) -> Result<(), JobError> {
     let refresh_job = scheduler::run_interval("content_refresh", refresh_interval, move || {
         let state = refresh_state.clone();
         async move {
+            mem_probe::record("content_refresh", "before");
             match tasks::content_refresh::run(&state, false, false).await {
                 Ok(stats) => info!(?stats, "content refresh run complete"),
                 Err(err) => warn!(error = %err, "content refresh run failed"),
             }
+            mem_probe::record("content_refresh", "after");
             Ok(())
         }
     });
@@ -61,9 +74,11 @@ pub async fn start(state: AppState, rebuild: bool) -> Result<(), JobError> {
     let douban_job = scheduler::run_interval("douban_crawl", douban_interval, move || {
         let state = douban_state.clone();
         async move {
+            mem_probe::record("douban_crawl", "before");
             if let Err(err) = tasks::douban_crawl::run(&state, false).await {
                 warn!(error = %err, "douban crawl failed");
             }
+            mem_probe::record("douban_crawl", "after");
             Ok(())
         }
     });
@@ -89,10 +104,12 @@ pub async fn start(state: AppState, rebuild: bool) -> Result<(), JobError> {
             move || {
                 let state = comments_state.clone();
                 async move {
+                    mem_probe::record("comments_sync", "before");
                     match tasks::comments_sync::run(&state, false).await {
                         Ok(stats) => info!(?stats, "comments sync complete"),
                         Err(err) => warn!(error = %err, "comments sync failed"),
                     }
+                    mem_probe::record("comments_sync", "after");
                     Ok(())
                 }
             },
@@ -106,27 +123,37 @@ pub async fn start(state: AppState, rebuild: bool) -> Result<(), JobError> {
         let kudos_job = scheduler::run_interval("kudos_cache_flush", kudos_interval, move || {
             let state = kudos_state.clone();
             async move {
+                mem_probe::record("kudos_cache_flush", "before");
                 if let Err(err) = tasks::kudos_cache::flush(&state).await {
                     warn!(error = %err, "kudos cache flush failed");
                 }
+                mem_probe::record("kudos_cache_flush", "after");
                 Ok(())
             }
         });
+        let heap_job = scheduler::run_interval("heap_dump", HEAP_DUMP_INTERVAL, move || async {
+            mem_probe::record("heap_dump", "interval");
+            Ok(())
+        });
         match comments_job {
             Some(comments_job) => {
-                tokio::try_join!(refresh_job, douban_job, kudos_job, comments_job)?;
+                tokio::try_join!(refresh_job, douban_job, kudos_job, comments_job, heap_job)?;
             }
             None => {
-                tokio::try_join!(refresh_job, douban_job, kudos_job)?;
+                tokio::try_join!(refresh_job, douban_job, kudos_job, heap_job)?;
             }
         }
     } else {
+        let heap_job = scheduler::run_interval("heap_dump", HEAP_DUMP_INTERVAL, move || async {
+            mem_probe::record("heap_dump", "interval");
+            Ok(())
+        });
         match comments_job {
             Some(comments_job) => {
-                tokio::try_join!(refresh_job, douban_job, comments_job)?;
+                tokio::try_join!(refresh_job, douban_job, comments_job, heap_job)?;
             }
             None => {
-                tokio::try_join!(refresh_job, douban_job)?;
+                tokio::try_join!(refresh_job, douban_job, heap_job)?;
             }
         }
     }

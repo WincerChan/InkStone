@@ -6,7 +6,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY migrations ./migrations
 
-RUN cargo build --manifest-path crates/app/Cargo.toml --release --locked
+RUN cargo build --manifest-path crates/app/Cargo.toml --release --locked --features jemalloc
 
 FROM debian:bookworm-slim
 
@@ -21,7 +21,8 @@ WORKDIR /var/lib/inkstone
 COPY --from=builder /app/target/release/inkstone-app /usr/local/bin/inkstone-app
 
 ENV INKSTONE_HTTP_ADDR=0.0.0.0:8080 \
-    INKSTONE_INDEX_DIR=/data/index
+    INKSTONE_INDEX_DIR=/data/index \
+    MALLOC_CONF=prof:true,prof_active:true
 
 VOLUME ["/data"]
 
