@@ -105,10 +105,10 @@ pub async fn fetch_totals(
         FROM pulse_events
         WHERE site = $1 AND day BETWEEN $2 AND $3
           AND ($4 IS NULL OR device = $4)
-          AND ($5 IS NULL OR LOWER(ua_family) = $5)
+          AND ($5 IS NULL OR ua_family = $5)
           AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR LOWER(entry_ref_host) = $7)
-          AND ($8 IS NULL OR LOWER(country) = $8)
+          AND ($7 IS NULL OR entry_ref_host = $7)
+          AND ($8 IS NULL OR country = $8)
         "#,
     )
     .bind(site)
@@ -142,10 +142,10 @@ pub async fn fetch_daily(
         FROM pulse_events
         WHERE site = $1 AND day BETWEEN $2 AND $3
           AND ($4 IS NULL OR device = $4)
-          AND ($5 IS NULL OR LOWER(ua_family) = $5)
+          AND ($5 IS NULL OR ua_family = $5)
           AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR LOWER(entry_ref_host) = $7)
-          AND ($8 IS NULL OR LOWER(country) = $8)
+          AND ($7 IS NULL OR entry_ref_host = $7)
+          AND ($8 IS NULL OR country = $8)
         GROUP BY day
         ORDER BY day
         "#,
@@ -183,10 +183,10 @@ pub async fn fetch_top_paths(
           AND path IS NOT NULL
           AND path <> ''
           AND ($4 IS NULL OR device = $4)
-          AND ($5 IS NULL OR LOWER(ua_family) = $5)
+          AND ($5 IS NULL OR ua_family = $5)
           AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR LOWER(entry_ref_host) = $7)
-          AND ($8 IS NULL OR LOWER(country) = $8)
+          AND ($7 IS NULL OR entry_ref_host = $7)
+          AND ($8 IS NULL OR country = $8)
         GROUP BY path
         ORDER BY pv DESC
         LIMIT $9
@@ -224,10 +224,10 @@ pub async fn fetch_device_stats(
         WHERE site = $1
           AND day BETWEEN $2 AND $3
           AND ($4 IS NULL OR device = $4)
-          AND ($5 IS NULL OR LOWER(ua_family) = $5)
+          AND ($5 IS NULL OR ua_family = $5)
           AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR LOWER(entry_ref_host) = $7)
-          AND ($8 IS NULL OR LOWER(country) = $8)
+          AND ($7 IS NULL OR entry_ref_host = $7)
+          AND ($8 IS NULL OR country = $8)
         GROUP BY value
         ORDER BY pv DESC
         LIMIT $9
@@ -265,10 +265,10 @@ pub async fn fetch_ua_stats(
         WHERE site = $1
           AND day BETWEEN $2 AND $3
           AND ($4 IS NULL OR device = $4)
-          AND ($5 IS NULL OR LOWER(ua_family) = $5)
+          AND ($5 IS NULL OR ua_family = $5)
           AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR LOWER(entry_ref_host) = $7)
-          AND ($8 IS NULL OR LOWER(country) = $8)
+          AND ($7 IS NULL OR entry_ref_host = $7)
+          AND ($8 IS NULL OR country = $8)
         GROUP BY value
         ORDER BY pv DESC
         LIMIT $9
@@ -306,10 +306,10 @@ pub async fn fetch_source_stats(
         WHERE site = $1
           AND day BETWEEN $2 AND $3
           AND ($4 IS NULL OR device = $4)
-          AND ($5 IS NULL OR LOWER(ua_family) = $5)
+          AND ($5 IS NULL OR ua_family = $5)
           AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR LOWER(entry_ref_host) = $7)
-          AND ($8 IS NULL OR LOWER(country) = $8)
+          AND ($7 IS NULL OR entry_ref_host = $7)
+          AND ($8 IS NULL OR country = $8)
         GROUP BY value
         ORDER BY pv DESC
         LIMIT $9
@@ -347,10 +347,10 @@ pub async fn fetch_ref_host_stats(
         WHERE site = $1
           AND day BETWEEN $2 AND $3
           AND ($4 IS NULL OR device = $4)
-          AND ($5 IS NULL OR LOWER(ua_family) = $5)
+          AND ($5 IS NULL OR ua_family = $5)
           AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR LOWER(entry_ref_host) = $7)
-          AND ($8 IS NULL OR LOWER(country) = $8)
+          AND ($7 IS NULL OR entry_ref_host = $7)
+          AND ($8 IS NULL OR country = $8)
         GROUP BY value
         ORDER BY pv DESC
         LIMIT $9
@@ -388,10 +388,10 @@ pub async fn fetch_country_stats(
         WHERE site = $1
           AND day BETWEEN $2 AND $3
           AND ($4 IS NULL OR device = $4)
-          AND ($5 IS NULL OR LOWER(ua_family) = $5)
+          AND ($5 IS NULL OR ua_family = $5)
           AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR LOWER(entry_ref_host) = $7)
-          AND ($8 IS NULL OR LOWER(country) = $8)
+          AND ($7 IS NULL OR entry_ref_host = $7)
+          AND ($8 IS NULL OR country = $8)
         GROUP BY value
         ORDER BY pv DESC
         LIMIT $9
@@ -426,20 +426,20 @@ pub async fn fetch_active_totals(
                 FROM pulse_events
                 WHERE site = $1 AND ts BETWEEN $2 AND $3
                   AND ($4 IS NULL OR device = $4)
-                  AND ($5 IS NULL OR LOWER(ua_family) = $5)
+                  AND ($5 IS NULL OR ua_family = $5)
                   AND ($6 IS NULL OR entry_source_type = $6)
-                  AND ($7 IS NULL OR LOWER(entry_ref_host) = $7)
-                  AND ($8 IS NULL OR LOWER(country) = $8)
+                  AND ($7 IS NULL OR entry_ref_host = $7)
+                  AND ($8 IS NULL OR country = $8)
             ) AS pv,
             (
                 SELECT COUNT(*)::bigint
                 FROM pulse_visitors
                 WHERE site = $1 AND last_seen_ts BETWEEN $2 AND $3
                   AND ($4 IS NULL OR last_device = $4)
-                  AND ($5 IS NULL OR LOWER(last_ua_family) = $5)
+                  AND ($5 IS NULL OR last_ua_family = $5)
                   AND ($6 IS NULL OR entry_source_type = $6)
-                  AND ($7 IS NULL OR LOWER(entry_ref_host) = $7)
-                  AND ($8 IS NULL OR LOWER(last_country) = $8)
+                  AND ($7 IS NULL OR entry_ref_host = $7)
+                  AND ($8 IS NULL OR last_country = $8)
             ) AS uv
         "#,
     )
@@ -476,10 +476,10 @@ pub async fn fetch_active_top_paths(
           AND path IS NOT NULL
           AND path <> ''
           AND ($4 IS NULL OR device = $4)
-          AND ($5 IS NULL OR LOWER(ua_family) = $5)
+          AND ($5 IS NULL OR ua_family = $5)
           AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR LOWER(entry_ref_host) = $7)
-          AND ($8 IS NULL OR LOWER(country) = $8)
+          AND ($7 IS NULL OR entry_ref_host = $7)
+          AND ($8 IS NULL OR country = $8)
         GROUP BY path
         ORDER BY pv DESC
         LIMIT $9
@@ -515,10 +515,10 @@ pub async fn fetch_active_minute_uv(
         WHERE site = $1
           AND last_seen_ts BETWEEN $2 AND $3
           AND ($4 IS NULL OR last_device = $4)
-          AND ($5 IS NULL OR LOWER(last_ua_family) = $5)
+          AND ($5 IS NULL OR last_ua_family = $5)
           AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR LOWER(entry_ref_host) = $7)
-          AND ($8 IS NULL OR LOWER(last_country) = $8)
+          AND ($7 IS NULL OR entry_ref_host = $7)
+          AND ($8 IS NULL OR last_country = $8)
         GROUP BY minute
         ORDER BY minute
         "#,
@@ -553,10 +553,10 @@ pub async fn fetch_active_device_counts(
         WHERE site = $1
           AND last_seen_ts BETWEEN $2 AND $3
           AND ($4 IS NULL OR last_device = $4)
-          AND ($5 IS NULL OR LOWER(last_ua_family) = $5)
+          AND ($5 IS NULL OR last_ua_family = $5)
           AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR LOWER(entry_ref_host) = $7)
-          AND ($8 IS NULL OR LOWER(last_country) = $8)
+          AND ($7 IS NULL OR entry_ref_host = $7)
+          AND ($8 IS NULL OR last_country = $8)
         GROUP BY value
         ORDER BY count DESC
         LIMIT $9
@@ -593,10 +593,10 @@ pub async fn fetch_active_ua_counts(
         WHERE site = $1
           AND last_seen_ts BETWEEN $2 AND $3
           AND ($4 IS NULL OR last_device = $4)
-          AND ($5 IS NULL OR LOWER(last_ua_family) = $5)
+          AND ($5 IS NULL OR last_ua_family = $5)
           AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR LOWER(entry_ref_host) = $7)
-          AND ($8 IS NULL OR LOWER(last_country) = $8)
+          AND ($7 IS NULL OR entry_ref_host = $7)
+          AND ($8 IS NULL OR last_country = $8)
         GROUP BY value
         ORDER BY count DESC
         LIMIT $9
@@ -635,10 +635,10 @@ pub async fn fetch_active_source_counts(
           AND entry_source_type IS NOT NULL
           AND entry_source_type <> ''
           AND ($4 IS NULL OR last_device = $4)
-          AND ($5 IS NULL OR LOWER(last_ua_family) = $5)
+          AND ($5 IS NULL OR last_ua_family = $5)
           AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR LOWER(entry_ref_host) = $7)
-          AND ($8 IS NULL OR LOWER(last_country) = $8)
+          AND ($7 IS NULL OR entry_ref_host = $7)
+          AND ($8 IS NULL OR last_country = $8)
         GROUP BY entry_source_type
         ORDER BY count DESC
         LIMIT $9
@@ -677,10 +677,10 @@ pub async fn fetch_active_ref_host_counts(
           AND entry_ref_host IS NOT NULL
           AND entry_ref_host <> ''
           AND ($4 IS NULL OR last_device = $4)
-          AND ($5 IS NULL OR LOWER(last_ua_family) = $5)
+          AND ($5 IS NULL OR last_ua_family = $5)
           AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR LOWER(entry_ref_host) = $7)
-          AND ($8 IS NULL OR LOWER(last_country) = $8)
+          AND ($7 IS NULL OR entry_ref_host = $7)
+          AND ($8 IS NULL OR last_country = $8)
         GROUP BY entry_ref_host
         ORDER BY count DESC
         LIMIT $9
@@ -717,10 +717,10 @@ pub async fn fetch_active_country_counts(
         WHERE site = $1
           AND last_seen_ts BETWEEN $2 AND $3
           AND ($4 IS NULL OR last_device = $4)
-          AND ($5 IS NULL OR LOWER(last_ua_family) = $5)
+          AND ($5 IS NULL OR last_ua_family = $5)
           AND ($6 IS NULL OR entry_source_type = $6)
-          AND ($7 IS NULL OR LOWER(entry_ref_host) = $7)
-          AND ($8 IS NULL OR LOWER(last_country) = $8)
+          AND ($7 IS NULL OR entry_ref_host = $7)
+          AND ($8 IS NULL OR last_country = $8)
         GROUP BY value
         ORDER BY count DESC
         LIMIT $9

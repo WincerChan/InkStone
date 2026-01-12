@@ -463,7 +463,7 @@ fn normalize_filter_value(
     {
         return Err(error);
     }
-    Ok(Some(trimmed.to_ascii_lowercase()))
+    Ok(Some(trimmed.to_string()))
 }
 
 fn normalize_ref_host_filter(value: Option<&str>) -> Result<Option<String>, PulseAdminError> {
@@ -482,7 +482,7 @@ fn normalize_ref_host_filter(value: Option<&str>) -> Result<Option<String>, Puls
     if host.len() > MAX_FILTER_LEN {
         return Err(PulseAdminError::InvalidRefHost);
     }
-    Ok(Some(host.to_ascii_lowercase()))
+    Ok(Some(host))
 }
 
 fn parse_ref_host(value: &str) -> Option<String> {
@@ -585,11 +585,11 @@ mod tests {
     }
 
     #[test]
-    fn normalize_filter_value_lowercases() {
+    fn normalize_filter_value_preserves_case() {
         let value = normalize_filter_value(Some("Chrome"), PulseAdminError::InvalidUaFamily)
             .unwrap()
             .unwrap();
-        assert_eq!(value, "chrome");
+        assert_eq!(value, "Chrome");
     }
 
     #[test]
@@ -604,6 +604,6 @@ mod tests {
         let value = normalize_ref_host_filter(Some("https://Example.COM:443/path"))
             .unwrap()
             .unwrap();
-        assert_eq!(value, "example.com");
+        assert_eq!(value, "Example.COM");
     }
 }
