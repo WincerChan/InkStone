@@ -12,11 +12,20 @@ struct MemStats {
     rss_anon_kb: Option<u64>,
     rss_file_kb: Option<u64>,
     pss_kb: Option<u64>,
+    pss_anon_kb: Option<u64>,
+    pss_file_kb: Option<u64>,
+    jemalloc_allocated_bytes: Option<u64>,
+    jemalloc_active_bytes: Option<u64>,
+    jemalloc_resident_bytes: Option<u64>,
 }
 
 pub fn record(job: &str, stage: &str) {
     match read_smaps_rollup() {
-        Ok(stats) => {
+        Ok(mut stats) => {
+            #[cfg(feature = "jemalloc")]
+            if let Err(err) = fill_jemalloc_stats(&mut stats) {
+                warn!(job, stage, error = %err, "failed to read jemalloc stats");
+            }
             info!(
                 job,
                 stage,
@@ -24,6 +33,11 @@ pub fn record(job: &str, stage: &str) {
                 rss_anon_kb = stats.rss_anon_kb,
                 rss_file_kb = stats.rss_file_kb,
                 pss_kb = stats.pss_kb,
+                pss_anon_kb = stats.pss_anon_kb,
+                pss_file_kb = stats.pss_file_kb,
+                jemalloc_allocated_bytes = stats.jemalloc_allocated_bytes,
+                jemalloc_active_bytes = stats.jemalloc_active_bytes,
+                jemalloc_resident_bytes = stats.jemalloc_resident_bytes,
                 "memory snapshot"
             );
         }
@@ -46,6 +60,10 @@ fn read_smaps_rollup() -> Result<MemStats, std::io::Error> {
             stats.rss_file_kb = Some(value);
         } else if let Some(value) = parse_kb(line, "Pss:") {
             stats.pss_kb = Some(value);
+        } else if let Some(value) = parse_kb(line, "Pss_Anon:") {
+            stats.pss_anon_kb = Some(value);
+        } else if let Some(value) = parse_kb(line, "Pss_File:") {
+            stats.pss_file_kb = Some(value);
         }
     }
     Ok(stats)
@@ -56,6 +74,20 @@ fn parse_kb(line: &str, key: &str) -> Option<u64> {
     let mut parts = value.split_whitespace();
     let number = parts.next()?.parse::<u64>().ok()?;
     Some(number)
+}
+
+#[cfg(feature = "jemalloc")]
+fn fill_jemalloc_stats(stats: &mut MemStats) -> Result<(), String> {
+    use tikv_jemalloc_ctl::{epoch, stats as jemalloc_stats};
+
+    epoch::advance().map_err(|err| err.to_string())?;
+    let allocated = jemalloc_stats::allocated::read().map_err(|err| err.to_string())?;
+    let active = jemalloc_stats::active::read().map_err(|err| err.to_string())?;
+    let resident = jemalloc_stats::resident::read().map_err(|err| err.to_string())?;
+    stats.jemalloc_allocated_bytes = Some(allocated as u64);
+    stats.jemalloc_active_bytes = Some(active as u64);
+    stats.jemalloc_resident_bytes = Some(resident as u64);
+    Ok(())
 }
 
 fn dump_heap(job: &str, stage: &str) {
