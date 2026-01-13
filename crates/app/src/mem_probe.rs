@@ -3,11 +3,8 @@ use std::time::{Duration, Instant};
 
 use tracing::{info, warn};
 
-#[cfg(feature = "jemalloc")]
 const HEAP_DUMP_DIR: &str = "/data/heap";
-#[cfg(feature = "jemalloc")]
 use chrono::Utc;
-#[cfg(feature = "jemalloc")]
 use std::path::{Path, PathBuf};
 
 const DUMP_TRIGGER_BYTES: u64 = 4 * 1024 * 1024;
@@ -19,6 +16,8 @@ static DUMP_STATE: OnceLock<Mutex<DumpState>> = OnceLock::new();
 struct DumpState {
     last_metric_bytes: Option<u64>,
     last_dump_at: Option<Instant>,
+    last_anon_metric_bytes: Option<u64>,
+    last_anon_dump_at: Option<Instant>,
 }
 
 #[derive(Debug, Default)]
@@ -168,41 +167,79 @@ fn trigger_metric_bytes(stats: &MemStats) -> Option<u64> {
         .or(stats.rss_kb.map(|value| value * 1024))
 }
 
+fn anon_metric_bytes(stats: &MemStats) -> Option<u64> {
+    stats
+        .pss_anon_kb
+        .or(stats.rss_anon_kb)
+        .or(stats.rss_kb)
+        .map(|value| value * 1024)
+}
+
 fn maybe_dump(ctx: MemProbeContext<'_>, stats: &MemStats) {
-    let Some(metric_bytes) = trigger_metric_bytes(stats) else {
-        return;
-    };
     let state = DUMP_STATE.get_or_init(|| Mutex::new(DumpState::default()));
     let mut guard = state.lock().expect("mem probe dump state poisoned");
     let now = Instant::now();
-    let delta = guard
-        .last_metric_bytes
-        .and_then(|previous| metric_bytes.checked_sub(previous))
-        .unwrap_or(0);
-    if delta >= DUMP_TRIGGER_BYTES {
-        let should_dump = guard
-            .last_dump_at
-            .map(|last| now.duration_since(last) >= DUMP_MIN_INTERVAL)
-            .unwrap_or(true);
-        if should_dump {
-            let job = ctx.job.unwrap_or(ctx.component);
-            let stage = ctx.stage.unwrap_or("snapshot");
-            info!(
-                component = ctx.component,
-                job = ctx.job,
-                stage = ctx.stage,
-                route = ctx.route,
-                step = ctx.step,
-                delta_bytes = delta,
-                metric_bytes,
-                "heap dump triggered by memory growth"
-            );
-            if dump_heap(job, stage) {
-                guard.last_dump_at = Some(now);
+    if let Some(metric_bytes) = trigger_metric_bytes(stats) {
+        let delta = guard
+            .last_metric_bytes
+            .and_then(|previous| metric_bytes.checked_sub(previous))
+            .unwrap_or(0);
+        if delta >= DUMP_TRIGGER_BYTES {
+            let should_dump = guard
+                .last_dump_at
+                .map(|last| now.duration_since(last) >= DUMP_MIN_INTERVAL)
+                .unwrap_or(true);
+            if should_dump {
+                let job = ctx.job.unwrap_or(ctx.component);
+                let stage = ctx.stage.unwrap_or("snapshot");
+                info!(
+                    component = ctx.component,
+                    job = ctx.job,
+                    stage = ctx.stage,
+                    route = ctx.route,
+                    step = ctx.step,
+                    delta_bytes = delta,
+                    metric_bytes,
+                    "heap dump triggered by memory growth"
+                );
+                if dump_heap(job, stage) {
+                    guard.last_dump_at = Some(now);
+                }
             }
         }
+        guard.last_metric_bytes = Some(metric_bytes);
     }
-    guard.last_metric_bytes = Some(metric_bytes);
+
+    if let Some(metric_bytes) = anon_metric_bytes(stats) {
+        let delta = guard
+            .last_anon_metric_bytes
+            .and_then(|previous| metric_bytes.checked_sub(previous))
+            .unwrap_or(0);
+        if delta >= DUMP_TRIGGER_BYTES {
+            let should_dump = guard
+                .last_anon_dump_at
+                .map(|last| now.duration_since(last) >= DUMP_MIN_INTERVAL)
+                .unwrap_or(true);
+            if should_dump {
+                let job = ctx.job.unwrap_or(ctx.component);
+                let stage = ctx.stage.unwrap_or("snapshot");
+                info!(
+                    component = ctx.component,
+                    job = ctx.job,
+                    stage = ctx.stage,
+                    route = ctx.route,
+                    step = ctx.step,
+                    delta_bytes = delta,
+                    anon_metric_bytes = metric_bytes,
+                    "smaps dump triggered by anon memory growth"
+                );
+                if dump_smaps(job, stage) {
+                    guard.last_anon_dump_at = Some(now);
+                }
+            }
+        }
+        guard.last_anon_metric_bytes = Some(metric_bytes);
+    }
 }
 
 #[cfg(feature = "jemalloc")]
@@ -235,6 +272,26 @@ fn dump_heap(job: &str, stage: &str) -> bool {
     }
 }
 
+fn dump_smaps(job: &str, stage: &str) -> bool {
+    if let Err(err) = dump_smaps_with_proc(job, stage) {
+        warn!(job, stage, error = %err, "smaps dump failed");
+        return false;
+    }
+    true
+}
+
+fn dump_smaps_with_proc(job: &str, stage: &str) -> Result<(), String> {
+    let dir = Path::new(HEAP_DUMP_DIR);
+    std::fs::create_dir_all(dir).map_err(|err| err.to_string())?;
+    let path = smaps_path(dir, job, stage);
+    let path_str = path.to_string_lossy().to_string();
+    let mut src = std::fs::File::open("/proc/self/smaps").map_err(|err| err.to_string())?;
+    let mut dst = std::fs::File::create(&path).map_err(|err| err.to_string())?;
+    std::io::copy(&mut src, &mut dst).map_err(|err| err.to_string())?;
+    info!(job, stage, path = %path_str, "smaps dump written");
+    Ok(())
+}
+
 #[cfg(feature = "jemalloc")]
 fn dump_heap_with_jemalloc(job: &str, stage: &str) -> Result<(), String> {
     let dir = Path::new(HEAP_DUMP_DIR);
@@ -258,4 +315,47 @@ fn dump_path(dir: &Path, job: &str, stage: &str) -> PathBuf {
     let timestamp = Utc::now().format("%Y%m%dT%H%M%SZ");
     let name = format!("{job}_{stage}_{timestamp}.heap");
     dir.join(name)
+}
+
+fn smaps_path(dir: &Path, job: &str, stage: &str) -> PathBuf {
+    let timestamp = Utc::now().format("%Y%m%dT%H%M%SZ");
+    let name = format!("smaps_{job}_{stage}_{timestamp}.txt");
+    dir.join(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn anon_metric_prefers_pss_anon() {
+        let mut stats = MemStats::default();
+        stats.pss_anon_kb = Some(12);
+        stats.rss_anon_kb = Some(34);
+        stats.rss_kb = Some(56);
+        assert_eq!(anon_metric_bytes(&stats), Some(12 * 1024));
+    }
+
+    #[test]
+    fn anon_metric_falls_back_to_rss_anon() {
+        let mut stats = MemStats::default();
+        stats.rss_anon_kb = Some(34);
+        stats.rss_kb = Some(56);
+        assert_eq!(anon_metric_bytes(&stats), Some(34 * 1024));
+    }
+
+    #[test]
+    fn anon_metric_falls_back_to_rss() {
+        let mut stats = MemStats::default();
+        stats.rss_kb = Some(56);
+        assert_eq!(anon_metric_bytes(&stats), Some(56 * 1024));
+    }
+
+    #[test]
+    fn trigger_metric_prefers_jemalloc_resident() {
+        let mut stats = MemStats::default();
+        stats.jemalloc_resident_bytes = Some(42);
+        stats.pss_anon_kb = Some(1000);
+        assert_eq!(trigger_metric_bytes(&stats), Some(42));
+    }
 }
