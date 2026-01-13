@@ -174,3 +174,8 @@ See `docs/api.md`.
 ## Deployment
 
 See `deploy/README.md` for GHCR + podman compose notes and systemd update timer.
+
+## TODO
+
+- Remove `valid_paths` and the earlier DB-constraint idea; validate public API requests via
+  a frontend-issued token (e.g. `X-Inkstone-Token`) so API can be stateless when split.
