@@ -71,7 +71,7 @@ Content refresh failures enter a 60-second per-task backoff without blocking oth
 - `INKSTONE_DOUBAN_USER_AGENT` (default: `Mozilla/5.0 ...`)
 - `INKSTONE_COOKIE_SECRET` (required for `bid` cookie signing)
 - `INKSTONE_STATS_SECRET` (required for daily stats id derivation)
-- `INKSTONE_VALID_PATHS_URL` (default: `https://velite-refactor.blog-8fo.pages.dev/valid_paths.txt`)
+- `INKSTONE_PUBLIC_TOKEN_SECRET` (required for `X-Inkstone-Token` validation)
 - `INKSTONE_KUDOS_FLUSH_SECS` (default: `60`, set `0` to disable)
 - `INKSTONE_GITHUB_WEBHOOK_SECRET` (required for GitHub webhook validation)
 - `INKSTONE_GITHUB_DISCUSSION_WEBHOOK_SECRET` (required for discussion webhooks)
@@ -99,7 +99,7 @@ INKSTONE_DOUBAN_COOKIE=bid=3EHqn8aRvcI \
 INKSTONE_DOUBAN_USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36" \
 INKSTONE_COOKIE_SECRET=changeme \
 INKSTONE_STATS_SECRET=changeme \
-INKSTONE_VALID_PATHS_URL=https://velite-refactor.blog-8fo.pages.dev/valid_paths.txt \
+INKSTONE_PUBLIC_TOKEN_SECRET=changeme \
 INKSTONE_KUDOS_FLUSH_SECS=60 \
 INKSTONE_GITHUB_WEBHOOK_SECRET=changeme \
 INKSTONE_GITHUB_DISCUSSION_WEBHOOK_SECRET=changeme \
@@ -129,7 +129,7 @@ INKSTONE_DOUBAN_COOKIE=bid=3EHqn8aRvcI
 INKSTONE_DOUBAN_USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
 INKSTONE_COOKIE_SECRET=changeme
 INKSTONE_STATS_SECRET=changeme
-INKSTONE_VALID_PATHS_URL=https://velite-refactor.blog-8fo.pages.dev/valid_paths.txt
+INKSTONE_PUBLIC_TOKEN_SECRET=changeme
 INKSTONE_KUDOS_FLUSH_SECS=60
 INKSTONE_GITHUB_WEBHOOK_SECRET=changeme
 INKSTONE_GITHUB_DISCUSSION_WEBHOOK_SECRET=changeme
@@ -174,8 +174,3 @@ See `docs/api.md`.
 ## Deployment
 
 See `deploy/README.md` for GHCR + podman compose notes and systemd update timer.
-
-## TODO
-
-- Remove `valid_paths` and the earlier DB-constraint idea; validate public API requests via
-  a frontend-issued token (e.g. `X-Inkstone-Token`) so API can be stateless when split.

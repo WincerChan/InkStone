@@ -166,9 +166,9 @@ Error body:
 
 `GET /v2/kudos`
 
-Query parameters:
+Headers:
 
-- `path` (required): blog path, e.g. `/posts/hello/`
+- `X-Inkstone-Token` (required): signed token containing the page path
 
 Response:
 
@@ -181,23 +181,22 @@ Response:
 
 `PUT /v2/kudos`
 
-Query parameters:
+Headers:
 
-- `path` (required): blog path, e.g. `/posts/hello/`
+- `X-Inkstone-Token` (required): signed token containing the page path
 
 Notes:
 
 - The API sets/uses the `bid` cookie for idempotent kudos.
 - `PUT /v2/kudos` requires a valid `bid` cookie; missing/invalid cookies return `401`.
-- `path` must exist in `valid_paths.txt`, otherwise `404` is returned.
 - Kudos counts are served from in-memory cache; the worker flushes pending kudos to the database.
 
 Error responses:
 
-- `400 Bad Request`: missing/invalid path
-- `404 Not Found`: path not in valid list
+- `400 Bad Request`: missing/invalid token or invalid path
+- `401 Unauthorized`: token signature invalid
 - `401 Unauthorized`: missing/invalid `bid` cookie
-- `503 Service Unavailable`: valid paths not loaded, cookie secrets missing, or DB not configured
+- `503 Service Unavailable`: token secret not configured, cookie secrets missing, or DB not configured
 - `500 Internal Server Error`: database error
 
 Error body:

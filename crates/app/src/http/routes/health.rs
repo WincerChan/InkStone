@@ -18,7 +18,6 @@ pub struct HealthModules {
     pub kudos: KudosStatus,
     pub pulse: PulseStatus,
     pub douban: ModuleStatus,
-    pub valid_paths: ValidPathsStatus,
     pub webhook: WebhookStatus,
 }
 
@@ -36,19 +35,14 @@ pub struct DatabaseStatus {
 pub struct KudosStatus {
     pub enabled: bool,
     pub cookie_ready: bool,
-    pub valid_paths_loaded: bool,
+    pub token_ready: bool,
 }
 
 #[derive(Debug, Serialize)]
 pub struct PulseStatus {
     pub enabled: bool,
     pub cookie_ready: bool,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ValidPathsStatus {
-    pub loaded: bool,
-    pub count: usize,
+    pub token_ready: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -64,14 +58,17 @@ pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
         .as_ref()
         .is_some_and(|value| !value.is_empty())
         && state
-            .config
-            .stats_secret
-            .as_ref()
-            .is_some_and(|value| !value.is_empty());
-    let valid_paths_count = state.valid_paths.read().await.len();
-    let valid_paths_loaded = valid_paths_count > 0;
-    let kudos_enabled = db_configured && cookie_ready && valid_paths_loaded;
-    let pulse_enabled = db_configured && cookie_ready;
+        .config
+        .stats_secret
+        .as_ref()
+        .is_some_and(|value| !value.is_empty());
+    let token_ready = state
+        .config
+        .public_token_secret
+        .as_ref()
+        .is_some_and(|value| !value.is_empty());
+    let kudos_enabled = db_configured && cookie_ready && token_ready;
+    let pulse_enabled = db_configured && cookie_ready && token_ready;
     let comments_enabled = db_configured;
     let webhook_configured = state
         .config
@@ -92,18 +89,15 @@ pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
             kudos: KudosStatus {
                 enabled: kudos_enabled,
                 cookie_ready,
-                valid_paths_loaded,
+                token_ready,
             },
             pulse: PulseStatus {
                 enabled: pulse_enabled,
                 cookie_ready,
+                token_ready,
             },
             douban: ModuleStatus {
                 enabled: db_configured,
-            },
-            valid_paths: ValidPathsStatus {
-                loaded: valid_paths_loaded,
-                count: valid_paths_count,
             },
             webhook: WebhookStatus {
                 configured: webhook_configured,
@@ -117,7 +111,6 @@ mod tests {
     use super::health;
     use axum::extract::State;
     use chrono::Duration;
-    use std::collections::HashSet;
     use std::sync::Arc;
     use tokio::sync::{Mutex, RwLock};
 
@@ -157,7 +150,7 @@ mod tests {
             cookie_secret: Some("cookie".to_string()),
             stats_secret: Some("stats".to_string()),
             search_hash_secret: None,
-            valid_paths_url: "https://example.com/paths.txt".to_string(),
+            public_token_secret: Some("token".to_string()),
             kudos_flush_interval: Duration::seconds(60).to_std().unwrap(),
             github_webhook_secret: None,
             github_discussion_webhook_secret: None,
@@ -177,7 +170,6 @@ mod tests {
             search: Arc::new(search),
             http_client: reqwest::Client::new(),
             db,
-            valid_paths: Arc::new(RwLock::new(HashSet::new())),
             kudos_cache: Arc::new(RwLock::new(KudosCache::default())),
             content_refresh_backoff: Arc::new(Mutex::new(ContentRefreshBackoff::default())),
             admin_health: Arc::new(Mutex::new(AdminHealthState::default())),

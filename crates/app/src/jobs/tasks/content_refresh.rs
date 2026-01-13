@@ -5,11 +5,10 @@ use tracing::{debug, warn};
 
 use crate::jobs::JobError;
 use crate::state::AppState;
-use crate::jobs::tasks::{comments_sync, feed_index, valid_paths_refresh};
+use crate::jobs::tasks::{comments_sync, feed_index};
 use crate::jobs::tasks::feed_index::JobStats;
 
 const FEED_BACKOFF: Duration = Duration::from_secs(60);
-const PATHS_BACKOFF: Duration = Duration::from_secs(60);
 
 pub async fn run(state: &AppState, rebuild: bool, force: bool) -> Result<JobStats, JobError> {
     {
@@ -17,26 +16,6 @@ pub async fn run(state: &AppState, rebuild: bool, force: bool) -> Result<JobStat
         health.content_refresh_last_run = Some(Utc::now());
     }
     let now = Instant::now();
-    let paths_backoff = if force || rebuild {
-        None
-    } else {
-        backoff_remaining(state, now, RefreshTask::Paths).await
-    };
-    if paths_backoff.is_none() {
-        match valid_paths_refresh::run(state).await {
-            Ok(()) => clear_backoff(state, RefreshTask::Paths).await,
-            Err(err) => {
-                warn!(error = %err, "valid paths refresh failed");
-                set_backoff(state, now, RefreshTask::Paths).await;
-            }
-        }
-    } else if let Some(remaining) = paths_backoff {
-        debug!(
-            remaining_secs = remaining.as_secs(),
-            "valid paths refresh skipped due to backoff"
-        );
-    }
-
     let feed_backoff = if force || rebuild {
         None
     } else {
@@ -96,7 +75,6 @@ pub async fn run(state: &AppState, rebuild: bool, force: bool) -> Result<JobStat
 #[derive(Clone, Copy)]
 enum RefreshTask {
     Feed,
-    Paths,
 }
 
 async fn backoff_remaining(
@@ -107,7 +85,6 @@ async fn backoff_remaining(
     let guard = state.content_refresh_backoff.lock().await;
     let next = match task {
         RefreshTask::Feed => guard.next_feed_at,
-        RefreshTask::Paths => guard.next_paths_at,
     }?;
     if next > now {
         Some(next.duration_since(now))
@@ -120,11 +97,9 @@ async fn set_backoff(state: &AppState, now: Instant, task: RefreshTask) {
     let mut guard = state.content_refresh_backoff.lock().await;
     let next = match task {
         RefreshTask::Feed => now + FEED_BACKOFF,
-        RefreshTask::Paths => now + PATHS_BACKOFF,
     };
     match task {
         RefreshTask::Feed => guard.next_feed_at = Some(next),
-        RefreshTask::Paths => guard.next_paths_at = Some(next),
     }
 }
 
@@ -132,6 +107,5 @@ async fn clear_backoff(state: &AppState, task: RefreshTask) {
     let mut guard = state.content_refresh_backoff.lock().await;
     match task {
         RefreshTask::Feed => guard.next_feed_at = None,
-        RefreshTask::Paths => guard.next_paths_at = None,
     }
 }

@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -17,7 +16,6 @@ pub struct AppState {
     pub search: Arc<SearchIndex>,
     pub http_client: Client,
     pub db: Option<DbPool>,
-    pub valid_paths: Arc<RwLock<HashSet<String>>>,
     pub kudos_cache: Arc<RwLock<KudosCache>>,
     pub content_refresh_backoff: Arc<Mutex<ContentRefreshBackoff>>,
     pub admin_health: Arc<Mutex<AdminHealthState>>,
@@ -26,7 +24,6 @@ pub struct AppState {
 #[derive(Debug, Default)]
 pub struct ContentRefreshBackoff {
     pub next_feed_at: Option<Instant>,
-    pub next_paths_at: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Default)]

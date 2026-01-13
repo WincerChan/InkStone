@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use reqwest::Client;
@@ -33,7 +32,6 @@ pub fn build_state(config: AppConfig) -> Result<AppState, WiringError> {
         search: Arc::new(search),
         http_client: client,
         db,
-        valid_paths: Arc::new(RwLock::new(HashSet::new())),
         kudos_cache: Arc::new(RwLock::new(KudosCache::default())),
         content_refresh_backoff: Arc::new(Mutex::new(ContentRefreshBackoff::default())),
         admin_health: Arc::new(Mutex::new(AdminHealthState::default())),

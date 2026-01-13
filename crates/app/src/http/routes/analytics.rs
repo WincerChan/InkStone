@@ -11,19 +11,18 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::http::middleware::bid_cookie::ClientIds;
+use crate::http::middleware::public_token::{self, PublicTokenError};
 use crate::state::AppState;
 use inkstone_infra::db::{
     touch_visitor_last_seen, upsert_engagement, upsert_page_view, upsert_visitor,
     AnalyticsRepoError, PageViewRecord,
 };
 
-const MAX_PATH_LEN: usize = 512;
 const MAX_SITE_LEN: usize = 255;
 
 #[derive(Debug, Deserialize)]
 pub struct PulsePvRequest {
     pub page_instance_id: Option<String>,
-    pub path: Option<String>,
     pub site: Option<String>,
     pub referrer: Option<String>,
 }
@@ -41,10 +40,14 @@ pub enum PulseApiError {
     MissingPageInstanceId,
     #[error("page_instance_id is invalid")]
     InvalidPageInstanceId,
-    #[error("path is required")]
-    MissingPath,
+    #[error("token is required")]
+    MissingToken,
+    #[error("token is invalid")]
+    InvalidToken,
     #[error("path is invalid")]
     InvalidPath,
+    #[error("token not configured")]
+    TokenNotConfigured,
     #[error("site is required")]
     MissingSite,
     #[error("site is invalid")]
@@ -53,10 +56,6 @@ pub enum PulseApiError {
     InvalidDuration,
     #[error("invalid payload")]
     InvalidPayload,
-    #[error("valid paths not loaded")]
-    ValidPathsUnavailable,
-    #[error("path is not allowed")]
-    PathNotAllowed,
     #[error("db not configured")]
     DbUnavailable,
     #[error("db error: {0}")]
@@ -76,12 +75,12 @@ pub async fn post_pv(
 ) -> Result<StatusCode, PulseApiError> {
     let payload: PulsePvRequest = parse_json(&body)?;
     let page_instance_id = parse_uuid(payload.page_instance_id.as_deref())?;
-    let path = normalize_path(payload.path.as_deref())?;
+    let secret = token_secret(&state)?;
+    let path = public_token::extract_path(&headers, secret).map_err(map_token_error)?;
     let site = normalize_site(payload.site.as_deref(), &headers)?;
     if !is_allowed_site(&site, &state.config.pulse_allowed_slds) {
         return Ok(StatusCode::NO_CONTENT);
     }
-    ensure_valid_path(&state, &path).await?;
     let ua = header_value(&headers, "user-agent");
     let ua_family = ua.and_then(parse_ua_family);
     let device = ua.and_then(parse_device);
@@ -166,20 +165,6 @@ where
     serde_json::from_slice(body).map_err(|_| PulseApiError::InvalidPayload)
 }
 
-fn normalize_path(path: Option<&str>) -> Result<String, PulseApiError> {
-    let trimmed = path.unwrap_or("").trim();
-    if trimmed.is_empty() {
-        return Err(PulseApiError::MissingPath);
-    }
-    if trimmed.len() > MAX_PATH_LEN || !trimmed.starts_with('/') {
-        return Err(PulseApiError::InvalidPath);
-    }
-    if trimmed.chars().any(|ch| ch.is_whitespace()) {
-        return Err(PulseApiError::InvalidPath);
-    }
-    Ok(trimmed.to_string())
-}
-
 fn normalize_site(site: Option<&str>, headers: &HeaderMap) -> Result<String, PulseApiError> {
     let candidate = site
         .map(|value| value.trim())
@@ -226,17 +211,6 @@ fn normalize_host_value(value: &str) -> Result<String, PulseApiError> {
         return Err(PulseApiError::InvalidSite);
     }
     Ok(host.trim_end_matches('.').to_ascii_lowercase())
-}
-
-async fn ensure_valid_path(state: &AppState, path: &str) -> Result<(), PulseApiError> {
-    let valid_paths = state.valid_paths.read().await;
-    if valid_paths.is_empty() {
-        return Err(PulseApiError::ValidPathsUnavailable);
-    }
-    if !valid_paths.contains(path) {
-        return Err(PulseApiError::PathNotAllowed);
-    }
-    Ok(())
 }
 
 fn header_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
@@ -352,14 +326,14 @@ impl IntoResponse for PulseApiError {
         let (status, message) = match &self {
             PulseApiError::MissingPageInstanceId
             | PulseApiError::InvalidPageInstanceId
-            | PulseApiError::MissingPath
+            | PulseApiError::MissingToken
             | PulseApiError::InvalidPath
             | PulseApiError::MissingSite
             | PulseApiError::InvalidSite
             | PulseApiError::InvalidDuration
             | PulseApiError::InvalidPayload => (StatusCode::BAD_REQUEST, self.to_string()),
-            PulseApiError::PathNotAllowed => (StatusCode::NOT_FOUND, self.to_string()),
-            PulseApiError::ValidPathsUnavailable | PulseApiError::DbUnavailable => {
+            PulseApiError::InvalidToken => (StatusCode::UNAUTHORIZED, self.to_string()),
+            PulseApiError::TokenNotConfigured | PulseApiError::DbUnavailable => {
                 (StatusCode::SERVICE_UNAVAILABLE, self.to_string())
             }
             PulseApiError::Db(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
@@ -369,18 +343,30 @@ impl IntoResponse for PulseApiError {
     }
 }
 
+fn token_secret(state: &AppState) -> Result<&str, PulseApiError> {
+    state
+        .config
+        .public_token_secret
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .ok_or(PulseApiError::TokenNotConfigured)
+}
+
+fn map_token_error(err: PublicTokenError) -> PulseApiError {
+    match err {
+        PublicTokenError::MissingToken => PulseApiError::MissingToken,
+        PublicTokenError::InvalidToken => PulseApiError::InvalidToken,
+        PublicTokenError::InvalidPath => PulseApiError::InvalidPath,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        derive_entry_source, extract_country, is_allowed_site, normalize_host_value, normalize_path,
-        normalize_site, parse_ref_host,
+        derive_entry_source, extract_country, is_allowed_site, normalize_host_value, normalize_site,
+        parse_ref_host,
     };
     use axum::http::HeaderMap;
-
-    #[test]
-    fn normalize_path_rejects_whitespace() {
-        assert!(normalize_path(Some("/posts/hello world")).is_err());
-    }
 
     #[test]
     fn parse_ref_host_extracts_host() {

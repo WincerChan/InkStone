@@ -3,8 +3,7 @@ use axum::Json;
 use serde::Serialize;
 
 use crate::http::routes::health::{
-    DatabaseStatus, HealthModules, KudosStatus, ModuleStatus, PulseStatus, ValidPathsStatus,
-    WebhookStatus,
+    DatabaseStatus, HealthModules, KudosStatus, ModuleStatus, PulseStatus, WebhookStatus,
 };
 use crate::state::{AdminHealthState, AppState};
 
@@ -63,14 +62,17 @@ async fn build_modules(state: &AppState) -> HealthModules {
         .as_ref()
         .is_some_and(|value| !value.is_empty())
         && state
-            .config
-            .stats_secret
-            .as_ref()
-            .is_some_and(|value| !value.is_empty());
-    let valid_paths_count = state.valid_paths.read().await.len();
-    let valid_paths_loaded = valid_paths_count > 0;
-    let kudos_enabled = db_configured && cookie_ready && valid_paths_loaded;
-    let pulse_enabled = db_configured && cookie_ready;
+        .config
+        .stats_secret
+        .as_ref()
+        .is_some_and(|value| !value.is_empty());
+    let token_ready = state
+        .config
+        .public_token_secret
+        .as_ref()
+        .is_some_and(|value| !value.is_empty());
+    let kudos_enabled = db_configured && cookie_ready && token_ready;
+    let pulse_enabled = db_configured && cookie_ready && token_ready;
     let comments_enabled = db_configured;
     let webhook_configured = state
         .config
@@ -89,18 +91,15 @@ async fn build_modules(state: &AppState) -> HealthModules {
         kudos: KudosStatus {
             enabled: kudos_enabled,
             cookie_ready,
-            valid_paths_loaded,
+            token_ready,
         },
         pulse: PulseStatus {
             enabled: pulse_enabled,
             cookie_ready,
+            token_ready,
         },
         douban: ModuleStatus {
             enabled: db_configured,
-        },
-        valid_paths: ValidPathsStatus {
-            loaded: valid_paths_loaded,
-            count: valid_paths_count,
         },
         webhook: WebhookStatus {
             configured: webhook_configured,
