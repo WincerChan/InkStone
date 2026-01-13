@@ -25,6 +25,10 @@ pub fn extract_path(headers: &HeaderMap, secret: &str) -> Result<String, PublicT
     verify_token(secret, token)
 }
 
+pub fn has_token(headers: &HeaderMap) -> bool {
+    extract_token(headers).is_some()
+}
+
 #[cfg(test)]
 pub fn issue_token(secret: &str, path: &str) -> Result<String, PublicTokenError> {
     let path = normalize_path(path)?;

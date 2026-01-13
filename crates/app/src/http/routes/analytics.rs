@@ -18,11 +18,13 @@ use inkstone_infra::db::{
     AnalyticsRepoError, PageViewRecord,
 };
 
+const MAX_PATH_LEN: usize = 512;
 const MAX_SITE_LEN: usize = 255;
 
 #[derive(Debug, Deserialize)]
 pub struct PulsePvRequest {
     pub page_instance_id: Option<String>,
+    pub path: Option<String>,
     pub site: Option<String>,
     pub referrer: Option<String>,
 }
@@ -75,8 +77,7 @@ pub async fn post_pv(
 ) -> Result<StatusCode, PulseApiError> {
     let payload: PulsePvRequest = parse_json(&body)?;
     let page_instance_id = parse_uuid(payload.page_instance_id.as_deref())?;
-    let secret = token_secret(&state)?;
-    let path = public_token::extract_path(&headers, secret).map_err(map_token_error)?;
+    let path = resolve_path(&state, &headers, payload.path.as_deref())?;
     let site = normalize_site(payload.site.as_deref(), &headers)?;
     if !is_allowed_site(&site, &state.config.pulse_allowed_slds) {
         return Ok(StatusCode::NO_CONTENT);
@@ -163,6 +164,36 @@ where
         return Err(PulseApiError::InvalidPayload);
     }
     serde_json::from_slice(body).map_err(|_| PulseApiError::InvalidPayload)
+}
+
+fn resolve_path(
+    state: &AppState,
+    headers: &HeaderMap,
+    legacy_path: Option<&str>,
+) -> Result<String, PulseApiError> {
+    if public_token::has_token(headers) {
+        let secret = token_secret(state)?;
+        return public_token::extract_path(headers, secret).map_err(map_token_error);
+    }
+    // TODO(compat): temporary legacy fallback for `path` payload during rollout.
+    normalize_legacy_path(legacy_path)
+}
+
+fn normalize_legacy_path(path: Option<&str>) -> Result<String, PulseApiError> {
+    let trimmed = path.unwrap_or("").trim();
+    if trimmed.is_empty() {
+        return Err(PulseApiError::MissingToken);
+    }
+    if trimmed.len() > MAX_PATH_LEN || !trimmed.starts_with('/') {
+        return Err(PulseApiError::InvalidPath);
+    }
+    if trimmed.chars().any(|ch| ch.is_whitespace()) {
+        return Err(PulseApiError::InvalidPath);
+    }
+    if trimmed.contains('?') || trimmed.contains('#') {
+        return Err(PulseApiError::InvalidPath);
+    }
+    Ok(trimmed.to_string())
 }
 
 fn normalize_site(site: Option<&str>, headers: &HeaderMap) -> Result<String, PulseApiError> {
@@ -363,8 +394,8 @@ fn map_token_error(err: PublicTokenError) -> PulseApiError {
 #[cfg(test)]
 mod tests {
     use super::{
-        derive_entry_source, extract_country, is_allowed_site, normalize_host_value, normalize_site,
-        parse_ref_host,
+        derive_entry_source, extract_country, is_allowed_site, normalize_host_value,
+        normalize_legacy_path, normalize_site, parse_ref_host, PulseApiError,
     };
     use axum::http::HeaderMap;
 
@@ -407,6 +438,22 @@ mod tests {
     fn normalize_site_requires_host() {
         let headers = HeaderMap::new();
         assert!(normalize_site(None, &headers).is_err());
+    }
+
+    #[test]
+    fn normalize_legacy_path_rejects_missing() {
+        assert!(matches!(
+            normalize_legacy_path(None),
+            Err(PulseApiError::MissingToken)
+        ));
+    }
+
+    #[test]
+    fn normalize_legacy_path_rejects_whitespace() {
+        assert!(matches!(
+            normalize_legacy_path(Some("/posts/hello world")),
+            Err(PulseApiError::InvalidPath)
+        ));
     }
 
     #[test]

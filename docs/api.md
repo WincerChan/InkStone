@@ -168,7 +168,7 @@ Error body:
 
 Headers:
 
-- `X-Inkstone-Token` (required): signed token containing the page path
+- `X-Inkstone-Token` (required; legacy `path` accepted during rollout): signed token containing the page path
 
 Response:
 
@@ -183,13 +183,15 @@ Response:
 
 Headers:
 
-- `X-Inkstone-Token` (required): signed token containing the page path
+- `X-Inkstone-Token` (required; legacy `path` accepted during rollout): signed token containing the page path
 
 Notes:
 
 - The API sets/uses the `bid` cookie for idempotent kudos.
 - `PUT /v2/kudos` requires a valid `bid` cookie; missing/invalid cookies return `401`.
 - Kudos counts are served from in-memory cache; the worker flushes pending kudos to the database.
+- Legacy compatibility: if `X-Inkstone-Token` is missing, the server temporarily accepts `path` query
+  param (will be removed after rollout).
 
 Error responses:
 
