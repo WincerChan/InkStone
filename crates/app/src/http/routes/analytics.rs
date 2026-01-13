@@ -1,5 +1,5 @@
 use axum::body::Bytes;
-use axum::extract::{Extension, State};
+use axum::extract::{Extension, Query, State};
 use axum::http::header::REFERER;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
@@ -27,6 +27,12 @@ pub struct PulsePvRequest {
     pub path: Option<String>,
     pub site: Option<String>,
     pub referrer: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PulseTokenParams {
+    #[serde(rename = "inkstone_token")]
+    pub inkstone_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -72,12 +78,17 @@ struct ErrorBody {
 pub async fn post_pv(
     State(state): State<AppState>,
     Extension(ids): Extension<ClientIds>,
+    Query(params): Query<PulseTokenParams>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<StatusCode, PulseApiError> {
     let payload: PulsePvRequest = parse_json(&body)?;
     let page_instance_id = parse_uuid(payload.page_instance_id.as_deref())?;
-    let path = resolve_path(&state, &headers, payload.path.as_deref())?;
+    let path = resolve_path(
+        &state,
+        params.inkstone_token.as_deref(),
+        payload.path.as_deref(),
+    )?;
     let site = normalize_site(payload.site.as_deref(), &headers)?;
     if !is_allowed_site(&site, &state.config.pulse_allowed_slds) {
         return Ok(StatusCode::NO_CONTENT);
@@ -168,12 +179,12 @@ where
 
 fn resolve_path(
     state: &AppState,
-    headers: &HeaderMap,
+    token: Option<&str>,
     legacy_path: Option<&str>,
 ) -> Result<String, PulseApiError> {
-    if public_token::has_token(headers) {
+    if let Some(token) = token {
         let secret = token_secret(state)?;
-        return public_token::extract_path(headers, secret).map_err(map_token_error);
+        return public_token::extract_path_from_token(secret, token).map_err(map_token_error);
     }
     // TODO(compat): temporary legacy fallback for `path` payload during rollout.
     normalize_legacy_path(legacy_path)
@@ -385,7 +396,6 @@ fn token_secret(state: &AppState) -> Result<&str, PulseApiError> {
 
 fn map_token_error(err: PublicTokenError) -> PulseApiError {
     match err {
-        PublicTokenError::MissingToken => PulseApiError::MissingToken,
         PublicTokenError::InvalidToken => PulseApiError::InvalidToken,
         PublicTokenError::InvalidPath => PulseApiError::InvalidPath,
     }

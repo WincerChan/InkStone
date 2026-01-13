@@ -20,7 +20,12 @@ pub fn build(state: AppState) -> Router {
         )
         .route("/v2/douban/marks", get(douban::marks_this_year))
         .route("/v2/comments", get(comments::get_comments))
-        .route("/v2/kudos", get(kudos::get_kudos).put(kudos::put_kudos))
+        .route(
+            "/v2/kudos",
+            get(kudos::get_kudos)
+                .put(kudos::put_kudos)
+                .post(kudos::put_kudos),
+        )
         .route("/v2/pulse/pv", post(analytics::post_pv))
         .route("/v2/pulse/engage", post(analytics::post_engage))
         .route("/v2/admin/login", post(admin::auth::login))

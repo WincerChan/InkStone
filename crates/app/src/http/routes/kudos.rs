@@ -1,5 +1,4 @@
 use axum::extract::{Extension, Query, State};
-use axum::http::HeaderMap;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
@@ -15,6 +14,8 @@ const MAX_PATH_LEN: usize = 512;
 
 #[derive(Debug, Deserialize)]
 pub struct KudosParams {
+    #[serde(rename = "inkstone_token")]
+    pub inkstone_token: Option<String>,
     pub path: Option<String>,
 }
 
@@ -47,10 +48,13 @@ pub async fn get_kudos(
     State(state): State<AppState>,
     Extension(ids): Extension<ClientIds>,
     Query(params): Query<KudosParams>,
-    headers: HeaderMap,
 ) -> Result<Json<KudosResponse>, KudosApiError> {
     ensure_db_configured(&state)?;
-    let path = resolve_path(&state, &headers, params.path.as_deref())?;
+    let path = resolve_path(
+        &state,
+        params.inkstone_token.as_deref(),
+        params.path.as_deref(),
+    )?;
     let cache = state.kudos_cache.read().await;
     let count = cache.count(&path);
     let interacted = cache.has(&path, &ids.interaction_id);
@@ -61,10 +65,13 @@ pub async fn put_kudos(
     State(state): State<AppState>,
     Extension(ids): Extension<ClientIds>,
     Query(params): Query<KudosParams>,
-    headers: HeaderMap,
 ) -> Result<Json<KudosResponse>, KudosApiError> {
     ensure_db_configured(&state)?;
-    let path = resolve_path(&state, &headers, params.path.as_deref())?;
+    let path = resolve_path(
+        &state,
+        params.inkstone_token.as_deref(),
+        params.path.as_deref(),
+    )?;
     let mut cache = state.kudos_cache.write().await;
     cache.insert(&path, &ids.interaction_id);
     let count = cache.count(&path);
@@ -76,12 +83,12 @@ pub async fn put_kudos(
 
 fn resolve_path(
     state: &AppState,
-    headers: &HeaderMap,
+    token: Option<&str>,
     legacy_path: Option<&str>,
 ) -> Result<String, KudosApiError> {
-    if public_token::has_token(headers) {
+    if let Some(token) = token {
         let secret = token_secret(state)?;
-        return public_token::extract_path(headers, secret).map_err(map_token_error);
+        return public_token::extract_path_from_token(secret, token).map_err(map_token_error);
     }
     // TODO(compat): temporary legacy fallback for `path` query param during rollout.
     normalize_legacy_path(legacy_path)
@@ -139,7 +146,6 @@ impl IntoResponse for KudosApiError {
 
 fn map_token_error(err: PublicTokenError) -> KudosApiError {
     match err {
-        PublicTokenError::MissingToken => KudosApiError::MissingToken,
         PublicTokenError::InvalidToken => KudosApiError::InvalidToken,
         PublicTokenError::InvalidPath => KudosApiError::InvalidPath,
     }
@@ -150,7 +156,6 @@ mod tests {
     use super::{normalize_legacy_path, resolve_path};
     use crate::http::middleware::public_token;
     use crate::state::AppState;
-    use axum::http::{HeaderMap, HeaderValue};
     use std::sync::Arc;
     use tokio::sync::{Mutex, RwLock};
 
@@ -218,17 +223,14 @@ mod tests {
     fn resolve_path_prefers_token() {
         let state = build_state(Some("secret"));
         let token = public_token::issue_token("secret", "/posts/a/").unwrap();
-        let mut headers = HeaderMap::new();
-        headers.insert("x-inkstone-token", HeaderValue::from_str(&token).unwrap());
-        let path = resolve_path(&state, &headers, Some("/posts/b/")).unwrap();
+        let path = resolve_path(&state, Some(&token), Some("/posts/b/")).unwrap();
         assert_eq!(path, "/posts/a/");
     }
 
     #[test]
     fn resolve_path_uses_legacy_when_missing_token() {
         let state = build_state(None);
-        let headers = HeaderMap::new();
-        let path = resolve_path(&state, &headers, Some("/posts/hello/")).unwrap();
+        let path = resolve_path(&state, None, Some("/posts/hello/")).unwrap();
         assert_eq!(path, "/posts/hello/");
     }
 }

@@ -1,16 +1,13 @@
-use axum::http::HeaderMap;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
-const TOKEN_HEADER: &str = "x-inkstone-token";
 const MAX_PATH_LEN: usize = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PublicTokenError {
-    MissingToken,
     InvalidToken,
     InvalidPath,
 }
@@ -18,15 +15,6 @@ pub enum PublicTokenError {
 #[derive(Debug, Serialize, Deserialize)]
 struct PublicTokenPayload {
     path: String,
-}
-
-pub fn extract_path(headers: &HeaderMap, secret: &str) -> Result<String, PublicTokenError> {
-    let token = extract_token(headers).ok_or(PublicTokenError::MissingToken)?;
-    verify_token(secret, token)
-}
-
-pub fn has_token(headers: &HeaderMap) -> bool {
-    extract_token(headers).is_some()
 }
 
 #[cfg(test)]
@@ -39,7 +27,7 @@ pub fn issue_token(secret: &str, path: &str) -> Result<String, PublicTokenError>
     Ok(format!("{payload_b64}.{signature}"))
 }
 
-fn verify_token(secret: &str, token: &str) -> Result<String, PublicTokenError> {
+pub fn extract_path_from_token(secret: &str, token: &str) -> Result<String, PublicTokenError> {
     let mut iter = token.splitn(2, '.');
     let payload_b64 = iter.next().filter(|value| !value.is_empty());
     let sig = iter.next().filter(|value| !value.is_empty());
@@ -67,14 +55,6 @@ fn sign_token(secret: &str, payload_b64: &str) -> String {
     URL_SAFE_NO_PAD.encode(raw)
 }
 
-fn extract_token(headers: &HeaderMap) -> Option<&str> {
-    headers
-        .get(TOKEN_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-}
-
 fn normalize_path(value: &str) -> Result<String, PublicTokenError> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -94,35 +74,29 @@ fn normalize_path(value: &str) -> Result<String, PublicTokenError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_path, issue_token, PublicTokenError};
-    use axum::http::{HeaderMap, HeaderValue};
+    use super::{extract_path_from_token, issue_token, PublicTokenError};
 
     #[test]
     fn issue_token_round_trip() {
         let token = issue_token("secret", "/posts/hello/").unwrap();
-        let mut headers = HeaderMap::new();
-        headers.insert("x-inkstone-token", HeaderValue::from_str(&token).unwrap());
-        let path = extract_path(&headers, "secret").unwrap();
+        let path = extract_path_from_token("secret", &token).unwrap();
         assert_eq!(path, "/posts/hello/");
     }
 
     #[test]
-    fn extract_path_rejects_missing_header() {
-        let headers = HeaderMap::new();
+    fn extract_path_rejects_missing_token() {
         assert_eq!(
-            extract_path(&headers, "secret").unwrap_err(),
-            PublicTokenError::MissingToken
+            extract_path_from_token("secret", "").unwrap_err(),
+            PublicTokenError::InvalidToken
         );
     }
 
     #[test]
     fn extract_path_rejects_invalid_signature() {
         let token = issue_token("secret", "/posts/hello/").unwrap();
-        let mut headers = HeaderMap::new();
         let tampered = format!("{token}x");
-        headers.insert("x-inkstone-token", HeaderValue::from_str(&tampered).unwrap());
         assert_eq!(
-            extract_path(&headers, "secret").unwrap_err(),
+            extract_path_from_token("secret", &tampered).unwrap_err(),
             PublicTokenError::InvalidToken
         );
     }

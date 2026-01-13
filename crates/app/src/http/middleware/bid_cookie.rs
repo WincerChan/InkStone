@@ -98,7 +98,8 @@ fn should_handle_cookie(request: &Request<Body>) -> bool {
 }
 
 fn requires_cookie(request: &Request<Body>) -> bool {
-    request.method() == Method::PUT && request.uri().path() == "/v2/kudos"
+    matches!(request.method(), &Method::PUT | &Method::POST)
+        && request.uri().path() == "/v2/kudos"
 }
 
 fn extract_cookie<B>(request: &Request<B>, name: &str) -> Option<String> {
@@ -231,6 +232,16 @@ mod tests {
     fn requires_cookie_for_kudos_put() {
         let req = Request::builder()
             .method("PUT")
+            .uri("/v2/kudos")
+            .body(axum::body::Body::empty())
+            .expect("request");
+        assert!(requires_cookie(&req));
+    }
+
+    #[test]
+    fn requires_cookie_for_kudos_post() {
+        let req = Request::builder()
+            .method("POST")
             .uri("/v2/kudos")
             .body(axum::body::Body::empty())
             .expect("request");
