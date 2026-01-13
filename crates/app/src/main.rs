@@ -9,8 +9,9 @@ mod wiring;
 
 use clap::Parser;
 use thiserror::Error;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
+use std::time::Duration;
 
 use crate::cli::Cli;
 use crate::config::ConfigError;
@@ -104,6 +105,17 @@ async fn main() -> Result<(), AppError> {
             info!("worker scheduler starting");
             jobs::start(worker_state, rebuild).await
         }));
+    }
+
+    if api_task.is_some() || worker_task.is_some() {
+        let search = state.search.clone();
+        // TODO(inkstone): make jieba prewarm configurable or remove after memory investigation.
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            if let Err(err) = search.prewarm_jieba() {
+                warn!(error = %err, "jieba prewarm failed");
+            }
+        });
     }
 
     if api_task.is_none() && worker_task.is_none() {

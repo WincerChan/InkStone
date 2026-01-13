@@ -152,6 +152,16 @@ impl SearchIndex {
         }
     }
 
+    pub fn prewarm_jieba(&self) -> Result<(), SearchIndexError> {
+        let mut analyzer = self
+            .index
+            .tokenizers()
+            .get("jieba")
+            .ok_or(SearchIndexError::MissingTokenizer("jieba"))?;
+        let _ = tokenize_keyword(&mut analyzer, "warmup");
+        Ok(())
+    }
+
     pub fn get_checksum(&self, id: &str) -> Result<Option<String>, SearchIndexError> {
         let searcher = self.reader.searcher();
         let term = Term::from_field_text(self.fields.id, id);
@@ -239,7 +249,7 @@ impl SearchIndex {
 }
 
 #[cfg(test)]
-mod tests {
+mod search_index_tests {
     use super::SearchIndex;
     use inkstone_core::domain::search::SearchDocument;
     use std::fs;
@@ -274,6 +284,15 @@ mod tests {
         index.upsert_documents(&[doc]).unwrap();
         let stats = index.stats();
         assert_eq!(stats.num_docs, 1);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prewarm_jieba_does_not_fail() {
+        let dir = temp_dir("inkstone-search-prewarm");
+        fs::create_dir_all(&dir).unwrap();
+        let index = SearchIndex::open_or_create(&dir).unwrap();
+        index.prewarm_jieba().unwrap();
         let _ = fs::remove_dir_all(&dir);
     }
 }
