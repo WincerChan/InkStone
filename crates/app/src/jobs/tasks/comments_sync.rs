@@ -150,7 +150,7 @@ async fn sync_discussion_with_client(
     let info = client.fetch_discussion_by_id(discussion_id).await?;
     let post_id = match find_discussion_by_discussion_id(pool, discussion_id).await? {
         Some(record) => record.post_id,
-        None => post_id_from_title(state, &info.title).await?,
+        None => post_id_from_title(&info.title)?,
     };
     store_discussion(pool, &post_id, &info).await?;
     Ok(())
@@ -192,7 +192,7 @@ fn should_sync_discussion(
     }
 }
 
-async fn post_id_from_title(state: &AppState, title: &str) -> Result<String, JobError> {
+fn post_id_from_title(title: &str) -> Result<String, JobError> {
     let trimmed = title.trim();
     if trimmed.is_empty() {
         return Err(JobError::Comments("empty discussion title".to_string()));
@@ -200,23 +200,14 @@ async fn post_id_from_title(state: &AppState, title: &str) -> Result<String, Job
     if trimmed.starts_with('/') {
         return normalize_post_id(trimmed);
     }
-    let (slug_raw, explicit_posts) = if let Some(value) = trimmed.strip_prefix("posts/") {
-        (value, true)
-    } else {
-        (trimmed, false)
-    };
+    let slug_raw = trimmed
+        .strip_prefix("posts/")
+        .ok_or_else(|| JobError::Comments("discussion title must include path".to_string()))?;
     let slug = slug_raw.trim_matches('/');
     let slug = Slug::try_from(slug)
         .map_err(|err| JobError::Comments(err.to_string()))?
         .as_str()
         .to_string();
-    if !explicit_posts {
-        let valid_paths = state.valid_paths.read().await;
-        let special = format!("/{slug}/");
-        if valid_paths.contains(&special) {
-            return Ok(special);
-        }
-    }
     Ok(format!("/posts/{slug}/"))
 }
 
