@@ -174,3 +174,8 @@ See `docs/api.md`.
 ## Deployment
 
 See `deploy/README.md` for GHCR + podman compose notes and systemd update timer.
+
+## TODO
+
+- Externalize `valid_paths` into a shared store (likely DB + FK) so public API can run without
+  in-process path state when split from admin/worker.

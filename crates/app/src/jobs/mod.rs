@@ -123,11 +123,9 @@ pub async fn start(state: AppState, rebuild: bool) -> Result<(), JobError> {
         let kudos_job = scheduler::run_interval("kudos_cache_flush", kudos_interval, move || {
             let state = kudos_state.clone();
             async move {
-                mem_probe::record("kudos_cache_flush", "before");
                 if let Err(err) = tasks::kudos_cache::flush(&state).await {
                     warn!(error = %err, "kudos cache flush failed");
                 }
-                mem_probe::record("kudos_cache_flush", "after");
                 Ok(())
             }
         });

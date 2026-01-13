@@ -5,7 +5,7 @@ use axum::routing::{get, post};
 use axum::Router;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
-use crate::http::middleware::{admin_auth, bid_cookie, search_query_limit};
+use crate::http::middleware::{admin_auth, bid_cookie, mem_probe, search_query_limit};
 use crate::state::AppState;
 use crate::http::routes::{admin, analytics, comments, douban, health, kudos, search, webhook};
 
@@ -87,6 +87,7 @@ pub fn build(state: AppState) -> Router {
             "/webhook/github/discussions",
             post(webhook::github_discussion_webhook),
         )
+        .layer(middleware::from_fn(mem_probe::record_admin_snapshot))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             admin_auth::require_admin,

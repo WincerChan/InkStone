@@ -4,6 +4,7 @@ use chrono::Utc;
 use tracing::{debug, warn};
 
 use crate::jobs::JobError;
+use crate::mem_probe::{self, MemProbeContext};
 use crate::state::AppState;
 use crate::jobs::tasks::{comments_sync, feed_index, valid_paths_refresh};
 use crate::jobs::tasks::feed_index::JobStats;
@@ -23,7 +24,18 @@ pub async fn run(state: &AppState, rebuild: bool, force: bool) -> Result<JobStat
         backoff_remaining(state, now, RefreshTask::Paths).await
     };
     if paths_backoff.is_none() {
-        match valid_paths_refresh::run(state).await {
+        mem_probe::record_with_context(MemProbeContext::worker_step(
+            "content_refresh",
+            "before",
+            "valid_paths_refresh",
+        ));
+        let result = valid_paths_refresh::run(state).await;
+        mem_probe::record_with_context(MemProbeContext::worker_step(
+            "content_refresh",
+            "after",
+            "valid_paths_refresh",
+        ));
+        match result {
             Ok(()) => clear_backoff(state, RefreshTask::Paths).await,
             Err(err) => {
                 warn!(error = %err, "valid paths refresh failed");
@@ -43,7 +55,18 @@ pub async fn run(state: &AppState, rebuild: bool, force: bool) -> Result<JobStat
         backoff_remaining(state, now, RefreshTask::Feed).await
     };
     let stats = if feed_backoff.is_none() {
-        match feed_index::run(state, rebuild).await {
+        mem_probe::record_with_context(MemProbeContext::worker_step(
+            "content_refresh",
+            "before",
+            "feed_index",
+        ));
+        let result = feed_index::run(state, rebuild).await;
+        mem_probe::record_with_context(MemProbeContext::worker_step(
+            "content_refresh",
+            "after",
+            "feed_index",
+        ));
+        match result {
             Ok(stats) => {
                 clear_backoff(state, RefreshTask::Feed).await;
                 stats

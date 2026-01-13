@@ -1,10 +1,25 @@
-use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
-use chrono::Utc;
 use tracing::{info, warn};
 
 #[cfg(feature = "jemalloc")]
 const HEAP_DUMP_DIR: &str = "/data/heap";
+#[cfg(feature = "jemalloc")]
+use chrono::Utc;
+#[cfg(feature = "jemalloc")]
+use std::path::{Path, PathBuf};
+
+const DUMP_TRIGGER_BYTES: u64 = 4 * 1024 * 1024;
+const DUMP_MIN_INTERVAL: Duration = Duration::from_secs(5 * 60);
+
+static DUMP_STATE: OnceLock<Mutex<DumpState>> = OnceLock::new();
+
+#[derive(Debug, Default)]
+struct DumpState {
+    last_metric_bytes: Option<u64>,
+    last_dump_at: Option<Instant>,
+}
 
 #[derive(Debug, Default)]
 struct MemStats {
@@ -19,16 +34,76 @@ struct MemStats {
     jemalloc_resident_bytes: Option<u64>,
 }
 
+#[derive(Clone, Copy)]
+pub struct MemProbeContext<'a> {
+    pub component: &'a str,
+    pub job: Option<&'a str>,
+    pub stage: Option<&'a str>,
+    pub route: Option<&'a str>,
+    pub step: Option<&'a str>,
+}
+
+impl<'a> MemProbeContext<'a> {
+    pub fn worker(job: &'a str, stage: &'a str) -> Self {
+        Self {
+            component: "worker",
+            job: Some(job),
+            stage: Some(stage),
+            route: None,
+            step: None,
+        }
+    }
+
+    pub fn worker_step(job: &'a str, stage: &'a str, step: &'a str) -> Self {
+        Self {
+            component: "worker",
+            job: Some(job),
+            stage: Some(stage),
+            route: None,
+            step: Some(step),
+        }
+    }
+
+    pub fn admin(route: &'a str, stage: &'a str) -> Self {
+        Self {
+            component: "admin",
+            job: None,
+            stage: Some(stage),
+            route: Some(route),
+            step: None,
+        }
+    }
+}
+
 pub fn record(job: &str, stage: &str) {
+    record_with_context(MemProbeContext::worker(job, stage));
+}
+
+pub fn record_with_context(ctx: MemProbeContext<'_>) {
     match read_smaps_rollup() {
-        Ok(mut stats) => {
+        Ok(stats) => {
+            #[cfg(feature = "jemalloc")]
+            let mut stats = stats;
+            #[cfg(not(feature = "jemalloc"))]
+            let stats = stats;
             #[cfg(feature = "jemalloc")]
             if let Err(err) = fill_jemalloc_stats(&mut stats) {
-                warn!(job, stage, error = %err, "failed to read jemalloc stats");
+                warn!(
+                    component = ctx.component,
+                    job = ctx.job,
+                    stage = ctx.stage,
+                    route = ctx.route,
+                    step = ctx.step,
+                    error = %err,
+                    "failed to read jemalloc stats"
+                );
             }
             info!(
-                job,
-                stage,
+                component = ctx.component,
+                job = ctx.job,
+                stage = ctx.stage,
+                route = ctx.route,
+                step = ctx.step,
                 rss_kb = stats.rss_kb,
                 rss_anon_kb = stats.rss_anon_kb,
                 rss_file_kb = stats.rss_file_kb,
@@ -40,12 +115,20 @@ pub fn record(job: &str, stage: &str) {
                 jemalloc_resident_bytes = stats.jemalloc_resident_bytes,
                 "memory snapshot"
             );
+            maybe_dump(ctx, &stats);
         }
         Err(err) => {
-            warn!(job, stage, error = %err, "failed to read smaps_rollup");
+            warn!(
+                component = ctx.component,
+                job = ctx.job,
+                stage = ctx.stage,
+                route = ctx.route,
+                step = ctx.step,
+                error = %err,
+                "failed to read smaps_rollup"
+            );
         }
     }
-    dump_heap(job, stage);
 }
 
 fn read_smaps_rollup() -> Result<MemStats, std::io::Error> {
@@ -76,6 +159,52 @@ fn parse_kb(line: &str, key: &str) -> Option<u64> {
     Some(number)
 }
 
+fn trigger_metric_bytes(stats: &MemStats) -> Option<u64> {
+    stats
+        .jemalloc_resident_bytes
+        .or(stats.jemalloc_active_bytes)
+        .or(stats.jemalloc_allocated_bytes)
+        .or(stats.pss_anon_kb.map(|value| value * 1024))
+        .or(stats.rss_kb.map(|value| value * 1024))
+}
+
+fn maybe_dump(ctx: MemProbeContext<'_>, stats: &MemStats) {
+    let Some(metric_bytes) = trigger_metric_bytes(stats) else {
+        return;
+    };
+    let state = DUMP_STATE.get_or_init(|| Mutex::new(DumpState::default()));
+    let mut guard = state.lock().expect("mem probe dump state poisoned");
+    let now = Instant::now();
+    let delta = guard
+        .last_metric_bytes
+        .and_then(|previous| metric_bytes.checked_sub(previous))
+        .unwrap_or(0);
+    if delta >= DUMP_TRIGGER_BYTES {
+        let should_dump = guard
+            .last_dump_at
+            .map(|last| now.duration_since(last) >= DUMP_MIN_INTERVAL)
+            .unwrap_or(true);
+        if should_dump {
+            let job = ctx.job.unwrap_or(ctx.component);
+            let stage = ctx.stage.unwrap_or("snapshot");
+            info!(
+                component = ctx.component,
+                job = ctx.job,
+                stage = ctx.stage,
+                route = ctx.route,
+                step = ctx.step,
+                delta_bytes = delta,
+                metric_bytes,
+                "heap dump triggered by memory growth"
+            );
+            if dump_heap(job, stage) {
+                guard.last_dump_at = Some(now);
+            }
+        }
+    }
+    guard.last_metric_bytes = Some(metric_bytes);
+}
+
 #[cfg(feature = "jemalloc")]
 fn fill_jemalloc_stats(stats: &mut MemStats) -> Result<(), String> {
     use tikv_jemalloc_ctl::{epoch, stats as jemalloc_stats};
@@ -90,13 +219,19 @@ fn fill_jemalloc_stats(stats: &mut MemStats) -> Result<(), String> {
     Ok(())
 }
 
-fn dump_heap(job: &str, stage: &str) {
+fn dump_heap(job: &str, stage: &str) -> bool {
     let _ = (job, stage);
     #[cfg(feature = "jemalloc")]
     {
         if let Err(err) = dump_heap_with_jemalloc(job, stage) {
             warn!(job, stage, error = %err, "heap dump failed");
+            return false;
         }
+        return true;
+    }
+    #[cfg(not(feature = "jemalloc"))]
+    {
+        false
     }
 }
 

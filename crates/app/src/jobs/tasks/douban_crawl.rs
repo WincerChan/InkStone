@@ -6,6 +6,7 @@ use serde::Serialize;
 use tracing::{debug, warn};
 
 use crate::jobs::JobError;
+use crate::mem_probe::{self, MemProbeContext};
 use crate::state::AppState;
 use inkstone_infra::db::{
     insert_douban_items, upsert_douban_items, DbPool, DoubanItemRecord,
@@ -68,7 +69,18 @@ pub async fn run(state: &AppState, rebuild: bool) -> Result<(), JobError> {
     }
     let uid = state.config.douban_uid.as_str();
     for category in [DoubanCategory::Movie, DoubanCategory::Book, DoubanCategory::Game] {
+        let step = category_step(category);
+        mem_probe::record_with_context(MemProbeContext::worker_step(
+            "douban_crawl",
+            "before",
+            step,
+        ));
         let items = fetch_all_pages(state, category, uid, rebuild).await?;
+        mem_probe::record_with_context(MemProbeContext::worker_step(
+            "douban_crawl",
+            "after",
+            step,
+        ));
         log_items(category, &items);
     }
     {
@@ -88,13 +100,32 @@ pub async fn run_for_category(
         health.douban_crawl_last_run = Some(Utc::now());
     }
     let uid = state.config.douban_uid.as_str();
+    let step = category_step(category);
+    mem_probe::record_with_context(MemProbeContext::worker_step(
+        "douban_crawl",
+        "before",
+        step,
+    ));
     let items = fetch_all_pages(state, category, uid, rebuild).await?;
+    mem_probe::record_with_context(MemProbeContext::worker_step(
+        "douban_crawl",
+        "after",
+        step,
+    ));
     log_items(category, &items);
     {
         let mut health = state.admin_health.lock().await;
         health.douban_crawl_last_success = Some(Utc::now());
     }
     Ok(())
+}
+
+fn category_step(category: DoubanCategory) -> &'static str {
+    match category {
+        DoubanCategory::Movie => "category_movie",
+        DoubanCategory::Book => "category_book",
+        DoubanCategory::Game => "category_game",
+    }
 }
 
 async fn fetch_all_pages(

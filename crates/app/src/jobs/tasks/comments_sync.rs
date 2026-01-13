@@ -6,6 +6,7 @@ use tracing::{info, warn};
 use crate::config::AppConfig;
 use crate::jobs::JobError;
 use crate::jobs::tasks::feed_index::{SearchIndexEntry, parse_search_index_entries};
+use crate::mem_probe::{self, MemProbeContext};
 use crate::state::AppState;
 use inkstone_core::types::slug::Slug;
 use inkstone_infra::db::{
@@ -66,9 +67,24 @@ pub async fn run(state: &AppState, rebuild: bool) -> Result<CommentsSyncStats, J
     );
 
     let mut stats = CommentsSyncStats::default();
+    mem_probe::record_with_context(MemProbeContext::worker_step(
+        "comments_sync",
+        "before",
+        "fetch_posts",
+    ));
     let posts = fetch_posts(state).await?;
+    mem_probe::record_with_context(MemProbeContext::worker_step(
+        "comments_sync",
+        "after",
+        "fetch_posts",
+    ));
     stats.posts_seen = posts.len();
 
+    mem_probe::record_with_context(MemProbeContext::worker_step(
+        "comments_sync",
+        "before",
+        "ensure_discussions",
+    ));
     for post in posts {
         match ensure_discussion_for_post(&client, pool, &config, &post).await {
             Ok(outcome) => {
@@ -82,12 +98,38 @@ pub async fn run(state: &AppState, rebuild: bool) -> Result<CommentsSyncStats, J
             }
         }
     }
+    mem_probe::record_with_context(MemProbeContext::worker_step(
+        "comments_sync",
+        "after",
+        "ensure_discussions",
+    ));
 
+    mem_probe::record_with_context(MemProbeContext::worker_step(
+        "comments_sync",
+        "before",
+        "list_discussions",
+    ));
     let discussions = list_discussions(pool).await?;
+    mem_probe::record_with_context(MemProbeContext::worker_step(
+        "comments_sync",
+        "after",
+        "list_discussions",
+    ));
     let latest_updates = if rebuild {
         HashMap::new()
     } else {
-        match fetch_discussion_updates(&client, &discussions).await {
+        mem_probe::record_with_context(MemProbeContext::worker_step(
+            "comments_sync",
+            "before",
+            "fetch_discussion_updates",
+        ));
+        let updates = fetch_discussion_updates(&client, &discussions).await;
+        mem_probe::record_with_context(MemProbeContext::worker_step(
+            "comments_sync",
+            "after",
+            "fetch_discussion_updates",
+        ));
+        match updates {
             Ok(updates) => updates,
             Err(err) => {
                 warn!(error = %err, "discussion precheck failed; syncing all");
@@ -95,6 +137,11 @@ pub async fn run(state: &AppState, rebuild: bool) -> Result<CommentsSyncStats, J
             }
         }
     };
+    mem_probe::record_with_context(MemProbeContext::worker_step(
+        "comments_sync",
+        "before",
+        "sync_discussions",
+    ));
     for discussion in discussions {
         if !is_github_discussion_id(&discussion.discussion_id) {
             continue;
@@ -114,6 +161,11 @@ pub async fn run(state: &AppState, rebuild: bool) -> Result<CommentsSyncStats, J
             stats.discussions_synced += 1;
         }
     }
+    mem_probe::record_with_context(MemProbeContext::worker_step(
+        "comments_sync",
+        "after",
+        "sync_discussions",
+    ));
 
     {
         let mut health = state.admin_health.lock().await;
