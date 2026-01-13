@@ -239,7 +239,7 @@ impl SearchIndex {
 }
 
 #[cfg(test)]
-mod tests {
+mod stats_tests {
     use super::SearchIndex;
     use inkstone_core::domain::search::SearchDocument;
     use std::fs;
@@ -444,6 +444,29 @@ fn build_keyword_query(
             );
             clauses.push((Occur::Should, Box::new(category_query)));
         }
+        if should_add_raw_keyword(keyword) {
+            clauses.push((
+                Occur::Should,
+                Box::new(TermQuery::new(
+                    Term::from_field_text(fields.title, keyword),
+                    IndexRecordOption::WithFreqs,
+                )),
+            ));
+            clauses.push((
+                Occur::Should,
+                Box::new(TermQuery::new(
+                    Term::from_field_text(fields.subtitle, keyword),
+                    IndexRecordOption::WithFreqs,
+                )),
+            ));
+            clauses.push((
+                Occur::Should,
+                Box::new(TermQuery::new(
+                    Term::from_field_text(fields.content, keyword),
+                    IndexRecordOption::WithFreqs,
+                )),
+            ));
+        }
         let keyword_query = if clauses.is_empty() {
             None
         } else {
@@ -467,6 +490,14 @@ fn build_keyword_query(
                 .collect(),
         ))))
     }
+}
+
+fn should_add_raw_keyword(keyword: &str) -> bool {
+    let trimmed = keyword.trim();
+    if trimmed.is_empty() || trimmed.chars().count() > 40 {
+        return false;
+    }
+    !trimmed.chars().any(|ch| ch.is_whitespace())
 }
 
 fn tokenize_keyword(
@@ -693,6 +724,44 @@ mod tests {
         let top_docs = searcher.search(&built.query, &TopDocs::with_limit(5))?;
         assert!(!top_docs.is_empty());
         Ok(())
+    }
+
+    #[test]
+    fn keyword_query_matches_chinese_subtitle_token() -> Result<(), SearchIndexError> {
+        let schema = build_schema();
+        let title = schema.get_field("title")?;
+        let subtitle = schema.get_field("subtitle")?;
+        let content = schema.get_field("content")?;
+        let index = Index::create_in_ram(schema);
+        register_jieba_tokenizer(&index);
+
+        let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
+        writer.add_document(doc!(
+            title => "无关标题",
+            subtitle => "终究还是走上了自建的路",
+            content => "无关正文"
+        ))?;
+        writer.commit()?;
+
+        let fields = SearchFields::from_schema(&index.schema())?;
+        let searcher = index.reader()?.searcher();
+        let search_query = SearchQuery {
+            keywords: vec!["自建".to_string()],
+            ..Default::default()
+        };
+        let built = build_query(&index, &fields, &search_query)?;
+        let top_docs = searcher.search(&built.query, &TopDocs::with_limit(5))?;
+        assert!(!top_docs.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn raw_keyword_term_skips_whitespace_or_long_input() {
+        assert!(!should_add_raw_keyword("   "));
+        assert!(!should_add_raw_keyword("a b"));
+        assert!(!should_add_raw_keyword(&"a".repeat(41)));
+        assert!(should_add_raw_keyword("自建"));
+        assert!(should_add_raw_keyword("keyword"));
     }
 
     #[test]
