@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use inkstone_core::domain::search::{SearchDocument, SearchHit, SearchQuery, SearchResult};
@@ -30,6 +30,8 @@ pub enum SearchIndexError {
     Io(#[from] std::io::Error),
     #[error("tantivy error: {0}")]
     Tantivy(#[from] tantivy::TantivyError),
+    #[error("missing search index at {0}")]
+    MissingIndex(PathBuf),
     #[error("missing tokenizer: {0}")]
     MissingTokenizer(&'static str),
     #[error("missing field in schema: {0}")]
@@ -76,6 +78,15 @@ pub struct SearchIndexStats {
 }
 
 impl SearchIndex {
+    pub fn open_existing(path: impl AsRef<Path>) -> Result<Self, SearchIndexError> {
+        let dir = path.as_ref();
+        if !dir.exists() || !dir.join("meta.json").exists() {
+            return Err(SearchIndexError::MissingIndex(dir.to_path_buf()));
+        }
+        let index = Index::open_in_dir(dir)?;
+        Self::open_from_index(index)
+    }
+
     pub fn open_or_create(
         path: impl AsRef<Path>,
     ) -> Result<Self, SearchIndexError> {
@@ -88,6 +99,10 @@ impl SearchIndex {
         } else {
             Index::create_in_dir(dir, schema)?
         };
+        Self::open_from_index(index)
+    }
+
+    fn open_from_index(index: Index) -> Result<Self, SearchIndexError> {
         register_tokenizers(&index)?;
         let schema = index.schema();
         let fields = SearchFields::from_schema(&schema)?;

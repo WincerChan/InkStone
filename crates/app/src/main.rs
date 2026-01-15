@@ -60,7 +60,10 @@ async fn main() -> Result<(), AppError> {
             std::fs::remove_dir_all(index_dir)?;
         }
     }
-    let state = wiring::build_state(config)?;
+    let state = match cli.mode {
+        cli::Mode::Public => wiring::build_state_readonly(config)?,
+        _ => wiring::build_state(config)?,
+    };
     if let Some(pool) = state.db.as_ref() {
         run_migrations(pool).await?;
     }
