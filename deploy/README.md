@@ -8,6 +8,13 @@ The GitHub Actions workflow builds and pushes:
 - `ghcr.io/<owner>/inkstone:sha-<short>`
 - `ghcr.io/<owner>/inkstone:vX.Y.Z` (tag builds)
 
+If you need dedicated public/admin images, build with:
+
+```bash
+docker build -f deploy/docker/Dockerfile --build-arg INKSTONE_PACKAGE=public -t ghcr.io/<owner>/inkstone-public:latest .
+docker build -f deploy/docker/Dockerfile --build-arg INKSTONE_PACKAGE=admin -t ghcr.io/<owner>/inkstone-admin:latest .
+```
+
 If the registry is private, log in on the server:
 
 ```bash
@@ -16,31 +23,32 @@ podman login ghcr.io -u <user> -p <token>
 
 ## Quadlet (systemd)
 
-1) Copy `deploy/systemd/inkstone.container` to `/etc/containers/systemd/`.
+1) Copy `deploy/systemd/inkstone-public.container` and `deploy/systemd/inkstone-admin.container`
+   to `/etc/containers/systemd/`.
 2) Create `/opt/inkstone/.env` with your runtime settings.
 3) Ensure `/opt/inkstone/data` is writable by uid `10001`.
 4) Reload and start:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl restart inkstone.service
+sudo systemctl restart inkstone-public.service inkstone-admin.service
 ```
 
-Quadlet reads `inkstone.container` and generates `inkstone.service` under
-`/run/systemd/generator/`. That generated unit cannot be enabled; just start or
-restart it after changes. The `[Install]` section in the `.container` file is
+Quadlet reads the `.container` files and generates units under
+`/run/systemd/generator/`. Those generated units cannot be enabled; just start or
+restart them after changes. The `[Install]` section in the `.container` file is
 applied by the generator on boot.
 
 If you want rootless podman, use `~/.config/containers/systemd/` and:
 
 ```bash
 systemctl --user daemon-reload
-systemctl --user restart inkstone.service
+systemctl --user restart inkstone-public.service inkstone-admin.service
 ```
 
 ### Auto update (podman auto-update)
 
-The quadlet file enables auto-update labels. Turn on the built-in timer:
+The quadlet files enable auto-update labels. Turn on the built-in timer:
 
 ```bash
 sudo systemctl enable --now podman-auto-update.timer
@@ -69,7 +77,7 @@ podman compose up -d
 
 ### Data directory and index path
 
-The container runs as uid `10001`, so the host data directory must be writable by that user.
+The admin container runs as uid `10001`, so the host data directory must be writable by that user.
 If you mount `/opt/inkstone/data` to `/data`, set:
 
 ```
