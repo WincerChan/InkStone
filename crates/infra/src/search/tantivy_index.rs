@@ -655,6 +655,10 @@ fn build_dictionary_keyword_query(
         .ok_or(SearchIndexError::MissingTokenizer(tokenizer))?;
     let mut keyword_queries = Vec::new();
     for keyword in &query.keywords {
+        let keyword = keyword.trim();
+        if keyword.is_empty() {
+            continue;
+        }
         let tokens = tokenize_keyword(&mut analyzer, keyword);
         let title_query = build_field_query(fields.title, &tokens);
         let subtitle_query = build_field_query(fields.subtitle, &tokens);
@@ -669,18 +673,33 @@ fn build_dictionary_keyword_query(
         if let Some(query) = content_query {
             clauses.push((Occur::Should, query));
         }
-        if !keyword.is_empty() {
-            let tag_query = TermQuery::new(
-                Term::from_field_text(fields.tags, keyword),
-                IndexRecordOption::Basic,
-            );
-            clauses.push((Occur::Should, Box::new(tag_query)));
-            let category_query = TermQuery::new(
-                Term::from_field_text(fields.category, keyword),
-                IndexRecordOption::Basic,
-            );
-            clauses.push((Occur::Should, Box::new(category_query)));
+        if tokens.len() > 1 && keyword.chars().any(is_cjk_char) {
+            let term = Term::from_field_text(fields.title, keyword);
+            clauses.push((
+                Occur::Should,
+                Box::new(TermQuery::new(term, IndexRecordOption::WithFreqs)),
+            ));
+            let term = Term::from_field_text(fields.subtitle, keyword);
+            clauses.push((
+                Occur::Should,
+                Box::new(TermQuery::new(term, IndexRecordOption::WithFreqs)),
+            ));
+            let term = Term::from_field_text(fields.content, keyword);
+            clauses.push((
+                Occur::Should,
+                Box::new(TermQuery::new(term, IndexRecordOption::WithFreqs)),
+            ));
         }
+        let tag_query = TermQuery::new(
+            Term::from_field_text(fields.tags, keyword),
+            IndexRecordOption::Basic,
+        );
+        clauses.push((Occur::Should, Box::new(tag_query)));
+        let category_query = TermQuery::new(
+            Term::from_field_text(fields.category, keyword),
+            IndexRecordOption::Basic,
+        );
+        clauses.push((Occur::Should, Box::new(category_query)));
         let keyword_query = if clauses.is_empty() {
             None
         } else {
