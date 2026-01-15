@@ -14,17 +14,15 @@ pub struct Cli {
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum Mode {
     All,
-    Api,
+    #[value(alias = "api")]
+    Public,
+    Admin,
     Worker,
 }
 
 impl Mode {
-    pub fn run_api(self) -> bool {
-        matches!(self, Mode::All | Mode::Api)
-    }
-
     pub fn run_worker(self) -> bool {
-        matches!(self, Mode::All | Mode::Worker)
+        matches!(self, Mode::All | Mode::Admin | Mode::Worker)
     }
 }
 

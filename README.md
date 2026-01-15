@@ -20,10 +20,16 @@ Build the workspace:
 cargo build
 ```
 
-Run API only:
+Run public API only:
 
 ```bash
-cargo run -p inkstone-app -- --mode api
+cargo run -p inkstone-app -- --mode public
+```
+
+Run admin API + worker:
+
+```bash
+cargo run -p inkstone-app -- --mode admin
 ```
 
 Run worker only:

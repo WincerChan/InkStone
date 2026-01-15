@@ -12,7 +12,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::cli::Cli;
 use crate::config::ConfigError;
-use crate::http::HttpError;
+use crate::http::{HttpError, HttpMode};
 use crate::jobs::JobError;
 use crate::wiring::WiringError;
 use inkstone_infra::db::run_migrations;
@@ -68,12 +68,18 @@ async fn main() -> Result<(), AppError> {
     let mut api_task = None;
     let mut worker_task = None;
 
-    if cli.mode.run_api() {
+    let http_mode = match cli.mode {
+        cli::Mode::All => Some(HttpMode::All),
+        cli::Mode::Public => Some(HttpMode::Public),
+        cli::Mode::Admin => Some(HttpMode::Admin),
+        cli::Mode::Worker => None,
+    };
+    if let Some(http_mode) = http_mode {
         let addr = state.config.http_addr;
         let http_state = state.clone();
         api_task = Some(tokio::spawn(async move {
             info!(%addr, "http server starting");
-            http::serve(addr, http_state).await
+            http::serve(addr, http_state, http_mode).await
         }));
     }
 

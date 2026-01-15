@@ -15,8 +15,15 @@ pub enum HttpError {
     Io(#[from] std::io::Error),
 }
 
-pub async fn serve(addr: SocketAddr, state: AppState) -> Result<(), HttpError> {
-    let router = router::build(state);
+#[derive(Debug, Clone, Copy)]
+pub enum HttpMode {
+    All,
+    Public,
+    Admin,
+}
+
+pub async fn serve(addr: SocketAddr, state: AppState, mode: HttpMode) -> Result<(), HttpError> {
+    let router = router::build(state.clone(), mode).with_state(state);
     let listener = TcpListener::bind(addr).await?;
     axum::serve(listener, router).await?;
     Ok(())
