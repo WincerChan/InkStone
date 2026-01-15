@@ -116,19 +116,16 @@ mod tests {
     use crate::state::{AdminHealthState, AppState, ContentRefreshBackoff};
     use tokio::sync::Mutex;
     use inkstone_infra::db::connect_lazy;
-    use inkstone_infra::search::{SearchIndex, SearchStrategy};
+    use inkstone_infra::search::SearchIndex;
 
     fn build_state(db_configured: bool) -> AppState {
         let suffix = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let strategy = SearchStrategy::Jieba;
-        let index_dir = std::env::temp_dir()
-            .join(format!("inkstone-health-{suffix}"))
-            .join(strategy.as_dir_name());
+        let index_dir = std::env::temp_dir().join(format!("inkstone-health-{suffix}"));
         let _ = std::fs::create_dir_all(&index_dir);
-        let search = SearchIndex::open_or_create(&index_dir, strategy).unwrap();
+        let search = SearchIndex::open_or_create(&index_dir).unwrap();
         let db = if db_configured {
             Some(connect_lazy("postgres://user:pass@localhost/db").unwrap())
         } else {
@@ -137,7 +134,6 @@ mod tests {
         let config = AppConfig {
             http_addr: "127.0.0.1:8080".parse().unwrap(),
             index_dir,
-            search_strategy: strategy,
             feed_url: "https://example.com/index.json".to_string(),
             poll_interval: Duration::seconds(300).to_std().unwrap(),
             douban_poll_interval: Duration::seconds(300).to_std().unwrap(),

@@ -184,7 +184,7 @@ mod tests {
     use crate::state::{AdminHealthState, AppState, ContentRefreshBackoff};
     use axum::http::{HeaderValue, StatusCode};
     use axum::Router;
-    use inkstone_infra::search::{SearchIndex, SearchStrategy};
+    use inkstone_infra::search::SearchIndex;
     use std::sync::Arc;
     use tokio::net::TcpListener;
     use tokio::sync::Mutex;
@@ -195,15 +195,11 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let strategy = SearchStrategy::Jieba;
-        let index_dir = std::env::temp_dir()
-            .join(format!("inkstone-router-{suffix}"))
-            .join(strategy.as_dir_name());
+        let index_dir = std::env::temp_dir().join(format!("inkstone-router-{suffix}"));
         let _ = std::fs::create_dir_all(&index_dir);
         let config = AppConfig {
             http_addr: "127.0.0.1:8080".parse().unwrap(),
             index_dir: index_dir.clone(),
-            search_strategy: strategy,
             feed_url: "https://example.com/index.json".to_string(),
             poll_interval: std::time::Duration::from_secs(300),
             douban_poll_interval: std::time::Duration::from_secs(300),
@@ -234,7 +230,7 @@ mod tests {
         };
         AppState {
             config: Arc::new(config),
-            search: Arc::new(SearchIndex::open_or_create(&index_dir, strategy).unwrap()),
+            search: Arc::new(SearchIndex::open_or_create(&index_dir).unwrap()),
             http_client: reqwest::Client::new(),
             db: None,
             content_refresh_backoff: Arc::new(Mutex::new(ContentRefreshBackoff::default())),
