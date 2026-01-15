@@ -14,6 +14,15 @@ permissions:
 jobs:
   docker:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - package: inkstone-app
+            image: inkstone # TODO: remove "all" image after public/admin rollout.
+          - package: public
+            image: inkstone-public
+          - package: admin
+            image: inkstone-admin
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,7 +41,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/inkstone
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
           tags: |
             type=ref,event=tag
             type=sha,format=short
@@ -43,6 +52,7 @@ jobs:
         with:
           context: .
           file: deploy/docker/Dockerfile
+          build-args: INKSTONE_PACKAGE=${{ matrix.package }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
