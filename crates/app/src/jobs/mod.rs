@@ -16,8 +16,6 @@ pub enum JobError {
     Search(#[from] inkstone_infra::search::SearchIndexError),
     #[error("db error: {0}")]
     Db(#[from] inkstone_infra::db::DoubanRepoError),
-    #[error("kudos db error: {0}")]
-    KudosDb(#[from] inkstone_infra::db::KudosRepoError),
     #[error("comments db error: {0}")]
     CommentsDb(#[from] inkstone_infra::db::CommentsRepoError),
     #[error("github error: {0}")]
@@ -68,15 +66,6 @@ pub async fn start(state: AppState, rebuild: bool) -> Result<(), JobError> {
         }
     });
 
-    if state.db.is_some() {
-        if let Err(err) = tasks::kudos_cache::load(&state).await {
-            warn!(error = %err, "kudos cache load failed");
-        }
-    } else {
-        warn!("db not configured; skipping kudos cache load/flush");
-    }
-
-    let kudos_interval = state.config.kudos_flush_interval;
     let comments_interval = state.config.comments_sync_interval;
     let comments_job = if state.db.is_some()
         && comments_interval.as_secs() > 0
@@ -101,33 +90,12 @@ pub async fn start(state: AppState, rebuild: bool) -> Result<(), JobError> {
         None
     };
 
-    if state.db.is_some() && kudos_interval.as_secs() > 0 {
-        let kudos_state = state.clone();
-        let kudos_job = scheduler::run_interval("kudos_cache_flush", kudos_interval, move || {
-            let state = kudos_state.clone();
-            async move {
-                if let Err(err) = tasks::kudos_cache::flush(&state).await {
-                    warn!(error = %err, "kudos cache flush failed");
-                }
-                Ok(())
-            }
-        });
-        match comments_job {
-            Some(comments_job) => {
-                tokio::try_join!(refresh_job, douban_job, kudos_job, comments_job)?;
-            }
-            None => {
-                tokio::try_join!(refresh_job, douban_job, kudos_job)?;
-            }
+    match comments_job {
+        Some(comments_job) => {
+            tokio::try_join!(refresh_job, douban_job, comments_job)?;
         }
-    } else {
-        match comments_job {
-            Some(comments_job) => {
-                tokio::try_join!(refresh_job, douban_job, comments_job)?;
-            }
-            None => {
-                tokio::try_join!(refresh_job, douban_job)?;
-            }
+        None => {
+            tokio::try_join!(refresh_job, douban_job)?;
         }
     }
     Ok(())

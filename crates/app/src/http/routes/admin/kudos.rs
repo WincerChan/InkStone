@@ -6,8 +6,6 @@ use chrono::{Duration, Utc};
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::jobs::tasks::kudos_cache;
-use crate::jobs::JobError;
 use crate::state::AppState;
 use inkstone_infra::db::{
     count_recent_kudos, fetch_kudos_overview, fetch_kudos_top_paths, fetch_recent_kudos_paths,
@@ -33,8 +31,6 @@ pub enum KudosAdminError {
     DbUnavailable,
     #[error("db error: {0}")]
     Db(#[from] KudosRepoError),
-    #[error("job error: {0}")]
-    Job(#[from] JobError),
 }
 
 #[derive(Debug, Serialize)]
@@ -44,23 +40,8 @@ struct ErrorBody {
 
 #[derive(Debug, Serialize)]
 pub struct KudosStatusResponse {
-    cache: KudosCacheStatus,
     database: KudosDbStatus,
     recent_24h: KudosRecentSummary,
-}
-
-#[derive(Debug, Serialize)]
-pub struct KudosActionResponse {
-    action: &'static str,
-    cache: KudosCacheStatus,
-    database: KudosDbStatus,
-}
-
-#[derive(Debug, Serialize)]
-pub struct KudosCacheStatus {
-    paths: i64,
-    total: i64,
-    pending: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -99,8 +80,8 @@ pub async fn get_kudos_status(
     Query(query): Query<KudosStatusQuery>,
 ) -> Result<Json<KudosStatusResponse>, KudosAdminError> {
     let limit = clamp_limit(query.limit);
-    let (cache, database) = load_status(&state).await?;
     let pool = state.db.as_ref().ok_or(KudosAdminError::DbUnavailable)?;
+    let overview = fetch_kudos_overview(pool).await?;
     let since = Utc::now() - Duration::hours(24);
     let total = count_recent_kudos(pool, since).await?;
     let items = fetch_recent_kudos_paths(pool, since, limit).await?;
@@ -109,35 +90,11 @@ pub async fn get_kudos_status(
         items: items.into_iter().map(map_recent_entry).collect(),
     };
     Ok(Json(KudosStatusResponse {
-        cache,
-        database,
+        database: KudosDbStatus {
+            paths: overview.paths,
+            total: overview.total,
+        },
         recent_24h,
-    }))
-}
-
-pub async fn post_kudos_flush(
-    State(state): State<AppState>,
-) -> Result<Json<KudosActionResponse>, KudosAdminError> {
-    ensure_db(&state)?;
-    kudos_cache::flush(&state).await?;
-    let (cache, database) = load_status(&state).await?;
-    Ok(Json(KudosActionResponse {
-        action: "flush",
-        cache,
-        database,
-    }))
-}
-
-pub async fn post_kudos_reload(
-    State(state): State<AppState>,
-) -> Result<Json<KudosActionResponse>, KudosAdminError> {
-    ensure_db(&state)?;
-    kudos_cache::load(&state).await?;
-    let (cache, database) = load_status(&state).await?;
-    Ok(Json(KudosActionResponse {
-        action: "reload",
-        cache,
-        database,
     }))
 }
 
@@ -166,9 +123,7 @@ impl IntoResponse for KudosAdminError {
     fn into_response(self) -> axum::response::Response {
         let (status, message) = match &self {
             KudosAdminError::DbUnavailable => (StatusCode::SERVICE_UNAVAILABLE, self.to_string()),
-            KudosAdminError::Db(_) | KudosAdminError::Job(_) => {
-                (StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
-            }
+            KudosAdminError::Db(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
         };
         let body = Json(ErrorBody { error: message });
         (status, body).into_response()
@@ -195,26 +150,6 @@ fn map_recent_entry(entry: KudosRecentPath) -> KudosRecentEntry {
         count: entry.count,
         last_at: entry.last_at.to_rfc3339(),
     }
-}
-
-async fn load_status(
-    state: &AppState,
-) -> Result<(KudosCacheStatus, KudosDbStatus), KudosAdminError> {
-    let pool = state.db.as_ref().ok_or(KudosAdminError::DbUnavailable)?;
-    let overview = fetch_kudos_overview(pool).await?;
-    let cache = {
-        let cache = state.kudos_cache.read().await;
-        KudosCacheStatus {
-            paths: cache.path_count(),
-            total: cache.total_count(),
-            pending: cache.pending_count(),
-        }
-    };
-    let database = KudosDbStatus {
-        paths: overview.paths,
-        total: overview.total,
-    };
-    Ok((cache, database))
 }
 
 #[cfg(test)]

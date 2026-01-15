@@ -191,7 +191,7 @@ Notes:
 
 - The API sets/uses the `bid` cookie for idempotent kudos.
 - `PUT /v2/kudos` and `POST /v2/kudos` require a valid `bid` cookie; missing/invalid cookies return `401`.
-- Kudos counts are served from in-memory cache; the worker flushes pending kudos to the database.
+- Kudos counts are read from the database; writes are persisted immediately.
 - Legacy compatibility: if `inkstone_token` is missing, the server temporarily accepts `path` query
   param (will be removed after rollout).
 

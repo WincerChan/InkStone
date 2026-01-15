@@ -112,11 +112,9 @@ mod tests {
     use axum::extract::State;
     use chrono::Duration;
     use std::sync::Arc;
-    use tokio::sync::{Mutex, RwLock};
-
     use crate::config::AppConfig;
-    use crate::kudos_cache::KudosCache;
     use crate::state::{AdminHealthState, AppState, ContentRefreshBackoff};
+    use tokio::sync::Mutex;
     use inkstone_infra::db::connect_lazy;
     use inkstone_infra::search::{SearchIndex, SearchStrategy};
 
@@ -155,7 +153,6 @@ mod tests {
             stats_secret: Some("stats".to_string()),
             search_hash_secret: None,
             public_token_secret: Some("token".to_string()),
-            kudos_flush_interval: Duration::seconds(60).to_std().unwrap(),
             github_webhook_secret: None,
             github_discussion_webhook_secret: None,
             github_app_id: None,
@@ -174,7 +171,6 @@ mod tests {
             search: Arc::new(search),
             http_client: reqwest::Client::new(),
             db,
-            kudos_cache: Arc::new(RwLock::new(KudosCache::default())),
             content_refresh_backoff: Arc::new(Mutex::new(ContentRefreshBackoff::default())),
             admin_health: Arc::new(Mutex::new(AdminHealthState::default())),
         }

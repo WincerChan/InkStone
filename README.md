@@ -52,8 +52,7 @@ If a value is missing or empty, `INKSTONE_*_FILE` is checked and the file
 contents (trimmed) are used.
 
 If `INKSTONE_DATABASE_URL` is set, migrations in `migrations/` run on startup.
-Kudos endpoints require `INKSTONE_COOKIE_SECRET`, `INKSTONE_STATS_SECRET`, and the worker to refresh
-valid paths and flush kudos cache (refresh uses `INKSTONE_POLL_INTERVAL_SECS`).
+Kudos endpoints require `INKSTONE_COOKIE_SECRET` and `INKSTONE_STATS_SECRET`.
 Content refresh failures enter a 60-second per-task backoff without blocking other tasks.
 
 - `INKSTONE_HTTP_ADDR` (default: `127.0.0.1:8080`)
@@ -72,7 +71,6 @@ Content refresh failures enter a 60-second per-task backoff without blocking oth
 - `INKSTONE_COOKIE_SECRET` (required for `bid` cookie signing)
 - `INKSTONE_STATS_SECRET` (required for daily stats id derivation)
 - `INKSTONE_PUBLIC_TOKEN_SECRET` (required for `X-Inkstone-Token` validation)
-- `INKSTONE_KUDOS_FLUSH_SECS` (default: `60`, set `0` to disable)
 - `INKSTONE_GITHUB_WEBHOOK_SECRET` (required for GitHub webhook validation)
 - `INKSTONE_GITHUB_DISCUSSION_WEBHOOK_SECRET` (required for discussion webhooks)
 - `INKSTONE_GITHUB_APP_ID` (GitHub App id)
@@ -100,7 +98,6 @@ INKSTONE_DOUBAN_USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Appl
 INKSTONE_COOKIE_SECRET=changeme \
 INKSTONE_STATS_SECRET=changeme \
 INKSTONE_PUBLIC_TOKEN_SECRET=changeme \
-INKSTONE_KUDOS_FLUSH_SECS=60 \
 INKSTONE_GITHUB_WEBHOOK_SECRET=changeme \
 INKSTONE_GITHUB_DISCUSSION_WEBHOOK_SECRET=changeme \
 INKSTONE_GITHUB_APP_ID=123456 \
@@ -130,7 +127,6 @@ INKSTONE_DOUBAN_USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Appl
 INKSTONE_COOKIE_SECRET=changeme
 INKSTONE_STATS_SECRET=changeme
 INKSTONE_PUBLIC_TOKEN_SECRET=changeme
-INKSTONE_KUDOS_FLUSH_SECS=60
 INKSTONE_GITHUB_WEBHOOK_SECRET=changeme
 INKSTONE_GITHUB_DISCUSSION_WEBHOOK_SECRET=changeme
 INKSTONE_GITHUB_APP_ID=123456

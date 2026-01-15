@@ -73,8 +73,6 @@ pub fn build(state: AppState) -> Router {
             "/v2/admin/kudos/top_paths",
             get(admin::kudos::get_kudos_top_paths),
         )
-        .route("/v2/admin/kudos/flush", post(admin::kudos::post_kudos_flush))
-        .route("/v2/admin/kudos/reload", post(admin::kudos::post_kudos_reload))
         .route(
             "/v2/admin/search/reindex",
             post(admin::search_reindex::post_search_reindex),

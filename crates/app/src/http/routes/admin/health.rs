@@ -20,7 +20,6 @@ pub struct AdminJobsStatus {
     pub content_refresh: AdminJobStatus,
     pub douban_crawl: AdminJobStatus,
     pub comments_sync: AdminJobStatus,
-    pub kudos_flush: AdminJobStatus,
 }
 
 #[derive(Debug, Serialize)]
@@ -120,10 +119,6 @@ fn map_jobs(snapshot: &AdminHealthState) -> AdminJobsStatus {
         comments_sync: AdminJobStatus {
             last_run_at: format_timestamp(snapshot.comments_sync_last_run),
             last_success_at: format_timestamp(snapshot.comments_sync_last_success),
-        },
-        kudos_flush: AdminJobStatus {
-            last_run_at: format_timestamp(snapshot.kudos_flush_last_run),
-            last_success_at: format_timestamp(snapshot.kudos_flush_last_success),
         },
     }
 }

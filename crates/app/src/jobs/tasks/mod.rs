@@ -4,5 +4,4 @@ pub mod content_refresh;
 pub mod douban_crawl;
 pub mod feed_index;
 pub mod github_sync;
-pub mod kudos_cache;
 pub mod search_reindex;

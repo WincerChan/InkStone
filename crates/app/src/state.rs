@@ -3,10 +3,9 @@ use std::time::Instant;
 
 use chrono::{DateTime, Utc};
 use reqwest::Client;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 
 use crate::config::AppConfig;
-use crate::kudos_cache::KudosCache;
 use inkstone_infra::db::DbPool;
 use inkstone_infra::search::SearchIndex;
 
@@ -16,7 +15,6 @@ pub struct AppState {
     pub search: Arc<SearchIndex>,
     pub http_client: Client,
     pub db: Option<DbPool>,
-    pub kudos_cache: Arc<RwLock<KudosCache>>,
     pub content_refresh_backoff: Arc<Mutex<ContentRefreshBackoff>>,
     pub admin_health: Arc<Mutex<AdminHealthState>>,
 }
@@ -34,8 +32,6 @@ pub struct AdminHealthState {
     pub douban_crawl_last_success: Option<DateTime<Utc>>,
     pub comments_sync_last_run: Option<DateTime<Utc>>,
     pub comments_sync_last_success: Option<DateTime<Utc>>,
-    pub kudos_flush_last_run: Option<DateTime<Utc>>,
-    pub kudos_flush_last_success: Option<DateTime<Utc>>,
     pub webhook_content_last_received: Option<DateTime<Utc>>,
     pub webhook_discussions_last_received: Option<DateTime<Utc>>,
 }
