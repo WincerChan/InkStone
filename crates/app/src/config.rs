@@ -3,11 +3,13 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use thiserror::Error;
+use inkstone_infra::search::SearchStrategy;
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub http_addr: SocketAddr,
     pub index_dir: PathBuf,
+    pub search_strategy: SearchStrategy,
     pub feed_url: String,
     pub poll_interval: Duration,
     pub douban_poll_interval: Duration,
@@ -57,6 +59,13 @@ impl AppConfig {
             .parse()
             .map_err(|_| ConfigError::InvalidSocket(http_addr_raw.clone()))?;
         let index_dir = PathBuf::from(read_string("INKSTONE_INDEX_DIR", "./data/index")?);
+        let search_strategy = match read_optional_string("INKSTONE_SEARCH_STRATEGY")? {
+            Some(raw) => SearchStrategy::parse(&raw).ok_or_else(|| {
+                ConfigError::InvalidValue("INKSTONE_SEARCH_STRATEGY", raw)
+            })?,
+            None => SearchStrategy::Jieba,
+        };
+        let index_dir = index_dir.join(search_strategy.as_dir_name());
         let feed_url = read_string(
             "INKSTONE_FEED_URL",
             "https://refactor-styles.blog-8fo.pages.dev/search-index.json",
@@ -105,6 +114,7 @@ impl AppConfig {
         Ok(Self {
             http_addr,
             index_dir,
+            search_strategy,
             feed_url,
             poll_interval: Duration::from_secs(poll_interval_secs),
             douban_poll_interval: Duration::from_secs(douban_poll_interval_secs),

@@ -14,5 +14,7 @@ tantivy = "0.25"
 tantivy-jieba = "0.17"
 thiserror = "1"
 uuid = { version = "1", features = ["serde"] }
+lindera = { version = "1.4", features = ["embedded-cc-cedict"] }
+lindera-tantivy = { version = "1.1", features = ["embedded-cc-cedict"] }
 
 inkstone-core = { path = "../core" }

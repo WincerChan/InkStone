@@ -21,7 +21,7 @@ pub enum WiringError {
 }
 
 pub fn build_state(config: AppConfig) -> Result<AppState, WiringError> {
-    let search = SearchIndex::open_or_create(&config.index_dir)?;
+    let search = SearchIndex::open_or_create(&config.index_dir, config.search_strategy)?;
     let client = Client::builder().timeout(config.request_timeout).build()?;
     let db = match config.database_url.as_deref() {
         Some(url) => Some(connect_lazy(url)?),

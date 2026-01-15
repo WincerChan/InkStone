@@ -15,3 +15,29 @@ impl Default for SearchSort {
         Self::Relevance
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchStrategy {
+    Jieba,
+    Lindera,
+    Ngram,
+}
+
+impl SearchStrategy {
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "jieba" => Some(Self::Jieba),
+            "lindera" => Some(Self::Lindera),
+            "ngram" => Some(Self::Ngram),
+            _ => None,
+        }
+    }
+
+    pub fn as_dir_name(self) -> &'static str {
+        match self {
+            Self::Jieba => "jieba",
+            Self::Lindera => "lindera",
+            Self::Ngram => "ngram",
+        }
+    }
+}
