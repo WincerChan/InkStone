@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use crate::jobs::tasks::feed_index;
 use crate::jobs::JobError;
-use crate::state::AppState;
+use crate::state::AdminState;
 
 #[derive(Debug, Error)]
 pub enum SearchAdminError {
@@ -42,7 +42,7 @@ pub struct SearchJobStats {
 }
 
 pub async fn post_search_reindex(
-    State(state): State<AppState>,
+    State(state): State<AdminState>,
 ) -> Result<Json<SearchIndexActionResponse>, SearchAdminError> {
     let stats = feed_index::run(&state, true).await?;
     Ok(Json(SearchIndexActionResponse {
@@ -52,7 +52,7 @@ pub async fn post_search_reindex(
 }
 
 pub async fn post_search_refresh(
-    State(state): State<AppState>,
+    State(state): State<AdminState>,
 ) -> Result<Json<SearchIndexActionResponse>, SearchAdminError> {
     let stats = feed_index::run(&state, false).await?;
     Ok(Json(SearchIndexActionResponse {
@@ -62,7 +62,7 @@ pub async fn post_search_refresh(
 }
 
 pub async fn get_search_status(
-    State(state): State<AppState>,
+    State(state): State<AdminState>,
 ) -> Result<Json<SearchIndexStatusResponse>, SearchAdminError> {
     let stats = state.search.stats();
     Ok(Json(SearchIndexStatusResponse {

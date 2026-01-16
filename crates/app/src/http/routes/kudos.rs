@@ -156,7 +156,6 @@ mod tests {
     use crate::http::middleware::public_token;
     use crate::state::AppState;
     use std::sync::Arc;
-    use tokio::sync::Mutex;
 
     fn build_state(secret: Option<&str>) -> AppState {
         let suffix = std::time::SystemTime::now()
@@ -199,12 +198,7 @@ mod tests {
         AppState {
             config: Arc::new(config),
             search: Arc::new(inkstone_infra::search::SearchIndex::open_or_create(&index_dir).unwrap()),
-            http_client: reqwest::Client::new(),
             db: None,
-            content_refresh_backoff: Arc::new(Mutex::new(
-                crate::state::ContentRefreshBackoff::default(),
-            )),
-            admin_health: Arc::new(Mutex::new(crate::state::AdminHealthState::default())),
         }
     }
 

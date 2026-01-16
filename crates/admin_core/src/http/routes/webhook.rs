@@ -10,7 +10,7 @@ use thiserror::Error;
 use tracing::{info, warn};
 
 use crate::jobs::tasks;
-use crate::state::AppState;
+use crate::state::AdminState;
 
 const HEADER_EVENT: &str = "x-github-event";
 const HEADER_SIGNATURE: &str = "x-hub-signature-256";
@@ -52,7 +52,7 @@ struct DiscussionPayload {
 }
 
 pub async fn github_webhook(
-    State(state): State<AppState>,
+    State(state): State<AdminState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<StatusCode, WebhookError> {
@@ -111,7 +111,7 @@ pub async fn github_webhook(
 }
 
 pub async fn github_discussion_webhook(
-    State(state): State<AppState>,
+    State(state): State<AdminState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<StatusCode, WebhookError> {

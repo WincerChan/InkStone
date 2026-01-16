@@ -12,7 +12,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 name = "admin"
 version = "0.1.0"
 dependencies = [
- "inkstone-app",
+ "inkstone-admin-core",
  "tokio",
 ]
 
@@ -1392,6 +1392,34 @@ checksum = "0ad4bb2b565bca0645f4d68c5c9af97fba094e9791da685bf83cb5f3ce74acf2"
 dependencies = [
  "equivalent",
  "hashbrown 0.16.1",
+]
+
+[[package]]
+name = "inkstone-admin-core"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "axum",
+ "base64",
+ "chrono",
+ "clap",
+ "hex",
+ "hmac",
+ "inkstone-app",
+ "inkstone-core",
+ "inkstone-infra",
+ "rand 0.8.5",
+ "reqwest",
+ "scraper",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
+ "tokio",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

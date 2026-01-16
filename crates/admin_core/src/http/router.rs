@@ -5,32 +5,78 @@ use axum::routing::{get, post};
 use axum::Router;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
-use crate::http::middleware::{bid_cookie, search_query_limit};
-use crate::http::routes::{analytics, comments, douban, health, kudos, search};
-use crate::state::AppState;
+use crate::http::middleware::admin_auth;
+use crate::http::routes::{admin, webhook};
+use crate::state::AdminState;
 
-pub fn build(state: AppState) -> Router<AppState> {
+pub fn build(state: AdminState) -> Router<AdminState> {
     let cors = build_cors(&state);
     let mut router = Router::new()
-        .route("/health", get(health::health))
+        .route("/v2/admin/login", post(admin::auth::login))
+        .route("/v2/admin/pulse/sites", get(admin::pulse::list_pulse_sites))
+        .route("/v2/admin/pulse/site", get(admin::pulse::get_pulse_site))
+        .route("/v2/admin/pulse/active", get(admin::pulse::get_pulse_active))
         .route(
-            "/v2/search",
-            get(search::search)
-                .layer(middleware::from_fn(search_query_limit::enforce_search_query_length)),
+            "/v2/admin/pulse/active/summary",
+            get(admin::pulse::get_pulse_active_summary),
         )
-        .route("/v2/douban/marks", get(douban::marks_this_year))
-        .route("/v2/comments", get(comments::get_comments))
+        .route("/v2/admin/health", get(admin::health::get_admin_health))
         .route(
-            "/v2/kudos",
-            get(kudos::get_kudos)
-                .put(kudos::put_kudos)
-                .post(kudos::put_kudos),
+            "/v2/admin/search/stats",
+            get(admin::search_stats::get_search_stats),
         )
-        .route("/v2/pulse/pv", post(analytics::post_pv))
-        .route("/v2/pulse/engage", post(analytics::post_engage))
+        .route(
+            "/v2/admin/comments/status",
+            get(admin::comments_sync::get_comments_status),
+        )
+        .route(
+            "/v2/admin/comments/sync",
+            post(admin::comments_sync::post_comments_sync),
+        )
+        .route(
+            "/v2/admin/comments/rebuild",
+            post(admin::comments_sync::post_comments_rebuild),
+        )
+        .route(
+            "/v2/admin/douban/status",
+            get(admin::douban_refresh::get_douban_status),
+        )
+        .route(
+            "/v2/admin/douban/refresh",
+            post(admin::douban_refresh::post_douban_refresh),
+        )
+        .route(
+            "/v2/admin/douban/rebuild",
+            post(admin::douban_refresh::post_douban_rebuild),
+        )
+        .route(
+            "/v2/admin/kudos/status",
+            get(admin::kudos::get_kudos_status),
+        )
+        .route(
+            "/v2/admin/kudos/top_paths",
+            get(admin::kudos::get_kudos_top_paths),
+        )
+        .route(
+            "/v2/admin/search/reindex",
+            post(admin::search_reindex::post_search_reindex),
+        )
+        .route(
+            "/v2/admin/search/refresh",
+            post(admin::search_reindex::post_search_refresh),
+        )
+        .route(
+            "/v2/admin/search/status",
+            get(admin::search_reindex::get_search_status),
+        )
+        .route("/webhook/github/content", post(webhook::github_webhook))
+        .route(
+            "/webhook/github/discussions",
+            post(webhook::github_discussion_webhook),
+        )
         .layer(middleware::from_fn_with_state(
             state.clone(),
-            bid_cookie::ensure_bid_cookie,
+            admin_auth::require_admin,
         ));
     if let Some(cors) = cors {
         router = router.layer(cors);
@@ -38,7 +84,7 @@ pub fn build(state: AppState) -> Router<AppState> {
     router
 }
 
-fn build_cors(state: &AppState) -> Option<CorsLayer> {
+fn build_cors(state: &AdminState) -> Option<CorsLayer> {
     let mut origins = Vec::new();
     let mut allow_any = false;
     for origin in state.config.cors_allow_origins.iter() {
@@ -83,21 +129,22 @@ fn should_enable_cors(allow_any: bool, origins: &[HeaderValue]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{build, is_wildcard_origin, should_enable_cors};
-    use crate::config::AppConfig;
-    use crate::state::AppState;
+    use crate::state::{AdminHealthState, AdminState, ContentRefreshBackoff};
     use axum::http::{HeaderValue, StatusCode};
     use axum::Router;
+    use inkstone_app::config::AppConfig;
     use inkstone_infra::search::SearchIndex;
     use std::sync::Arc;
     use tokio::net::TcpListener;
+    use tokio::sync::Mutex;
     use tokio::time::{sleep, Duration};
 
-    fn build_state() -> AppState {
+    fn build_state() -> AdminState {
         let suffix = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let index_dir = std::env::temp_dir().join(format!("inkstone-router-{suffix}"));
+        let index_dir = std::env::temp_dir().join(format!("inkstone-admin-router-{suffix}"));
         let _ = std::fs::create_dir_all(&index_dir);
         let config = AppConfig {
             http_addr: "127.0.0.1:8080".parse().unwrap(),
@@ -130,10 +177,13 @@ mod tests {
             admin_password_hash: None,
             admin_token_secret: None,
         };
-        AppState {
+        AdminState {
             config: Arc::new(config),
             search: Arc::new(SearchIndex::open_or_create(&index_dir).unwrap()),
+            http_client: reqwest::Client::new(),
             db: None,
+            content_refresh_backoff: Arc::new(Mutex::new(ContentRefreshBackoff::default())),
+            admin_health: Arc::new(Mutex::new(AdminHealthState::default())),
         }
     }
 
@@ -162,11 +212,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn public_router_serves_public_routes() {
+    async fn admin_router_hides_public_routes() {
         let state = build_state();
         let router = build(state.clone()).with_state(state);
         let status = status_for(router, "/v2/search").await;
-        assert_ne!(status, StatusCode::NOT_FOUND);
+        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 
     #[test]

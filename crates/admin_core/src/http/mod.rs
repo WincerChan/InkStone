@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use thiserror::Error;
 use tokio::net::TcpListener;
 
-use crate::state::AppState;
+use crate::state::AdminState;
 
 #[derive(Debug, Error)]
 pub enum HttpError {
@@ -15,7 +15,7 @@ pub enum HttpError {
     Io(#[from] std::io::Error),
 }
 
-pub async fn serve(addr: SocketAddr, state: AppState) -> Result<(), HttpError> {
+pub async fn serve(addr: SocketAddr, state: AdminState) -> Result<(), HttpError> {
     let router = router::build(state.clone()).with_state(state);
     let listener = TcpListener::bind(addr).await?;
     axum::serve(listener, router).await?;

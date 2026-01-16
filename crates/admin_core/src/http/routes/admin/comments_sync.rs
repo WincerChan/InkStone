@@ -8,7 +8,7 @@ use thiserror::Error;
 
 use crate::jobs::tasks::comments_sync;
 use crate::jobs::JobError;
-use crate::state::AppState;
+use crate::state::AdminState;
 use inkstone_infra::db::{
     count_recent_comments, fetch_comments_overview, fetch_recent_comments, CommentsRepoError,
     RecentCommentRecord,
@@ -80,7 +80,7 @@ pub struct CommentsRecentEntry {
 }
 
 pub async fn post_comments_sync(
-    State(state): State<AppState>,
+    State(state): State<AdminState>,
 ) -> Result<Json<CommentsSyncResponse>, CommentsAdminError> {
     ensure_comments_configured(&state)?;
     let stats = comments_sync::run(&state, false).await?;
@@ -91,7 +91,7 @@ pub async fn post_comments_sync(
 }
 
 pub async fn post_comments_rebuild(
-    State(state): State<AppState>,
+    State(state): State<AdminState>,
 ) -> Result<Json<CommentsSyncResponse>, CommentsAdminError> {
     ensure_comments_configured(&state)?;
     let stats = comments_sync::run(&state, true).await?;
@@ -102,7 +102,7 @@ pub async fn post_comments_rebuild(
 }
 
 pub async fn get_comments_status(
-    State(state): State<AppState>,
+    State(state): State<AdminState>,
     Query(query): Query<CommentsStatusQuery>,
 ) -> Result<Json<CommentsStatusResponse>, CommentsAdminError> {
     let pool = state.db.as_ref().ok_or(CommentsAdminError::DbUnavailable)?;
@@ -139,7 +139,7 @@ impl IntoResponse for CommentsAdminError {
     }
 }
 
-fn ensure_comments_configured(state: &AppState) -> Result<(), CommentsAdminError> {
+fn ensure_comments_configured(state: &AdminState) -> Result<(), CommentsAdminError> {
     if state.db.is_none() {
         return Err(CommentsAdminError::DbUnavailable);
     }

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use thiserror::Error;
 
-use crate::state::AppState;
+use crate::state::AdminState;
 
 const ADMIN_COOKIE_NAME: &str = "inkstone_admin";
 
@@ -32,7 +32,7 @@ struct AdminTokenPayload {
 }
 
 pub async fn require_admin(
-    State(state): State<AppState>,
+    State(state): State<AdminState>,
     request: Request<Body>,
     next: Next,
 ) -> Result<Response, AdminAuthError> {

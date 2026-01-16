@@ -4,5 +4,5 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-inkstone-app = { path = "../app" }
+inkstone-admin-core = { path = "../admin_core" }
 tokio = { version = "1", features = ["full"] }

@@ -1,11 +1,9 @@
 use std::sync::Arc;
 
-use reqwest::Client;
 use thiserror::Error;
-use tokio::sync::Mutex;
 
 use crate::config::AppConfig;
-use crate::state::{AdminHealthState, AppState, ContentRefreshBackoff};
+use crate::state::AppState;
 use inkstone_infra::db::{connect_lazy, DbPoolError};
 use inkstone_infra::search::{SearchIndex, SearchIndexError};
 
@@ -30,7 +28,6 @@ pub fn build_state_readonly(config: AppConfig) -> Result<AppState, WiringError> 
 }
 
 fn build_state_with_search(config: AppConfig, search: SearchIndex) -> Result<AppState, WiringError> {
-    let client = Client::builder().timeout(config.request_timeout).build()?;
     let db = match config.database_url.as_deref() {
         Some(url) => Some(connect_lazy(url)?),
         None => None,
@@ -38,10 +35,7 @@ fn build_state_with_search(config: AppConfig, search: SearchIndex) -> Result<App
     Ok(AppState {
         config: Arc::new(config),
         search: Arc::new(search),
-        http_client: client,
         db,
-        content_refresh_backoff: Arc::new(Mutex::new(ContentRefreshBackoff::default())),
-        admin_health: Arc::new(Mutex::new(AdminHealthState::default())),
     })
 }
 

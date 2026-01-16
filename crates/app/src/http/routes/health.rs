@@ -113,8 +113,7 @@ mod tests {
     use chrono::Duration;
     use std::sync::Arc;
     use crate::config::AppConfig;
-    use crate::state::{AdminHealthState, AppState, ContentRefreshBackoff};
-    use tokio::sync::Mutex;
+    use crate::state::AppState;
     use inkstone_infra::db::connect_lazy;
     use inkstone_infra::search::SearchIndex;
 
@@ -165,10 +164,7 @@ mod tests {
         AppState {
             config: Arc::new(config),
             search: Arc::new(search),
-            http_client: reqwest::Client::new(),
             db,
-            content_refresh_backoff: Arc::new(Mutex::new(ContentRefreshBackoff::default())),
-            admin_health: Arc::new(Mutex::new(AdminHealthState::default())),
         }
     }
 

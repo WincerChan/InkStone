@@ -1,6 +1,6 @@
-use inkstone_app::{run_with_mode_override, AppError, Mode};
+use inkstone_app::{run_public, AppError};
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
-    run_with_mode_override(Mode::Public).await
+    run_public().await
 }

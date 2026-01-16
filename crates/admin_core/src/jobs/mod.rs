@@ -4,7 +4,7 @@ pub mod tasks;
 use thiserror::Error;
 use tracing::{info, warn};
 
-use crate::state::AppState;
+use crate::state::AdminState;
 
 #[derive(Debug, Error)]
 pub enum JobError {
@@ -26,7 +26,7 @@ pub enum JobError {
     Io(#[from] std::io::Error),
 }
 
-pub async fn start(state: AppState, rebuild: bool) -> Result<(), JobError> {
+pub async fn start(state: AdminState, rebuild: bool) -> Result<(), JobError> {
     if rebuild {
         info!("running content refresh rebuild before scheduler");
         let stats = tasks::content_refresh::run(&state, true, true).await?;
