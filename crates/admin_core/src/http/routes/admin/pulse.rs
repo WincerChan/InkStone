@@ -6,7 +6,7 @@ use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::state::AppState;
+use crate::state::AdminState;
 use inkstone_infra::db::{
     fetch_active_country_counts, fetch_active_device_counts, fetch_active_minute_uv,
     fetch_active_ref_host_counts, fetch_active_source_counts, fetch_active_top_paths,
@@ -204,7 +204,7 @@ pub struct PulseDimStatsEntry {
 }
 
 pub async fn list_pulse_sites(
-    State(state): State<AppState>,
+    State(state): State<AdminState>,
 ) -> Result<Json<PulseSitesResponse>, PulseAdminError> {
     let pool = state.db.as_ref().ok_or(PulseAdminError::DbUnavailable)?;
     let sites = list_sites(pool).await?;
@@ -216,7 +216,7 @@ pub async fn list_pulse_sites(
 }
 
 pub async fn get_pulse_site(
-    State(state): State<AppState>,
+    State(state): State<AdminState>,
     Query(query): Query<PulseSiteQuery>,
 ) -> Result<Json<PulseSiteStatsResponse>, PulseAdminError> {
     let site = normalize_site_param(query.site.as_deref())?;
@@ -262,7 +262,7 @@ pub async fn get_pulse_site(
 }
 
 pub async fn get_pulse_active(
-    State(state): State<AppState>,
+    State(state): State<AdminState>,
     Query(query): Query<PulseActiveQuery>,
 ) -> Result<Json<PulseActiveResponse>, PulseAdminError> {
     let site = normalize_site_param(query.site.as_deref())?;
@@ -309,7 +309,7 @@ pub async fn get_pulse_active(
 }
 
 pub async fn get_pulse_active_summary(
-    State(state): State<AppState>,
+    State(state): State<AdminState>,
     Query(query): Query<PulseActiveSummaryQuery>,
 ) -> Result<Json<PulseActiveSummaryResponse>, PulseAdminError> {
     let site = normalize_site_param(query.site.as_deref())?;

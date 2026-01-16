@@ -6,7 +6,7 @@ use chrono::{Duration, Utc};
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::state::AppState;
+use crate::state::AdminState;
 use inkstone_infra::db::{
     count_recent_kudos, fetch_kudos_overview, fetch_kudos_top_paths, fetch_recent_kudos_paths,
     KudosRecentPath, KudosRepoError,
@@ -76,7 +76,7 @@ pub struct KudosTopPathEntry {
 }
 
 pub async fn get_kudos_status(
-    State(state): State<AppState>,
+    State(state): State<AdminState>,
     Query(query): Query<KudosStatusQuery>,
 ) -> Result<Json<KudosStatusResponse>, KudosAdminError> {
     let limit = clamp_limit(query.limit);
@@ -99,7 +99,7 @@ pub async fn get_kudos_status(
 }
 
 pub async fn get_kudos_top_paths(
-    State(state): State<AppState>,
+    State(state): State<AdminState>,
     Query(query): Query<KudosTopQuery>,
 ) -> Result<Json<KudosTopPathsResponse>, KudosAdminError> {
     ensure_db(&state)?;
@@ -130,7 +130,7 @@ impl IntoResponse for KudosAdminError {
     }
 }
 
-fn ensure_db(state: &AppState) -> Result<(), KudosAdminError> {
+fn ensure_db(state: &AdminState) -> Result<(), KudosAdminError> {
     if state.db.is_none() {
         return Err(KudosAdminError::DbUnavailable);
     }

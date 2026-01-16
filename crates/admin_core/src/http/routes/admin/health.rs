@@ -2,10 +2,10 @@ use axum::extract::State;
 use axum::Json;
 use serde::Serialize;
 
-use crate::http::routes::health::{
+use crate::state::{AdminHealthState, AdminState};
+use inkstone_runtime::health::{
     DatabaseStatus, HealthModules, KudosStatus, ModuleStatus, PulseStatus, WebhookStatus,
 };
-use crate::state::{AdminHealthState, AppState};
 
 #[derive(Debug, Serialize)]
 pub struct AdminHealthResponse {
@@ -39,7 +39,7 @@ pub struct AdminWebhookStatus {
     pub last_received_at: Option<String>,
 }
 
-pub async fn get_admin_health(State(state): State<AppState>) -> Json<AdminHealthResponse> {
+pub async fn get_admin_health(State(state): State<AdminState>) -> Json<AdminHealthResponse> {
     let modules = build_modules(&state).await;
     let snapshot = {
         let guard = state.admin_health.lock().await;
@@ -53,7 +53,7 @@ pub async fn get_admin_health(State(state): State<AppState>) -> Json<AdminHealth
     })
 }
 
-async fn build_modules(state: &AppState) -> HealthModules {
+async fn build_modules(state: &AdminState) -> HealthModules {
     let db_configured = state.db.is_some();
     let cookie_ready = state
         .config

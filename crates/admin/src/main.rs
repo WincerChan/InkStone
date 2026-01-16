@@ -1,6 +1,6 @@
-use inkstone_app::{run_with_mode_override, AppError, Mode};
+use inkstone_admin_core::{AppError, run};
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
-    run_with_mode_override(Mode::Admin).await
+    run().await
 }

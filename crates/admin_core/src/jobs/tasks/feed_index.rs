@@ -5,7 +5,7 @@ use thiserror::Error;
 use tracing::warn;
 
 use crate::jobs::JobError;
-use crate::state::AppState;
+use crate::state::AdminState;
 use inkstone_core::domain::search::SearchDocument;
 
 #[derive(Debug)]
@@ -40,7 +40,7 @@ pub(crate) struct SearchIndexEntry {
     pub content: String,
 }
 
-pub async fn run(state: &AppState, rebuild: bool) -> Result<JobStats, JobError> {
+pub async fn run(state: &AdminState, rebuild: bool) -> Result<JobStats, JobError> {
     let response = state
         .http_client
         .get(&state.config.feed_url)

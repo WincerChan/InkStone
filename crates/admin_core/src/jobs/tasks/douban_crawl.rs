@@ -6,7 +6,7 @@ use serde::Serialize;
 use tracing::{debug, warn};
 
 use crate::jobs::JobError;
-use crate::state::AppState;
+use crate::state::AdminState;
 use inkstone_infra::db::{
     insert_douban_items, upsert_douban_items, DbPool, DoubanItemRecord,
 };
@@ -61,7 +61,7 @@ impl DoubanCategory {
     }
 }
 
-pub async fn run(state: &AppState, rebuild: bool) -> Result<(), JobError> {
+pub async fn run(state: &AdminState, rebuild: bool) -> Result<(), JobError> {
     {
         let mut health = state.admin_health.lock().await;
         health.douban_crawl_last_run = Some(Utc::now());
@@ -79,7 +79,7 @@ pub async fn run(state: &AppState, rebuild: bool) -> Result<(), JobError> {
 }
 
 pub async fn run_for_category(
-    state: &AppState,
+    state: &AdminState,
     rebuild: bool,
     category: DoubanCategory,
 ) -> Result<(), JobError> {
@@ -98,7 +98,7 @@ pub async fn run_for_category(
 }
 
 async fn fetch_all_pages(
-    state: &AppState,
+    state: &AdminState,
     category: DoubanCategory,
     uid: &str,
     rebuild: bool,
@@ -143,7 +143,7 @@ async fn fetch_all_pages(
     Ok(items)
 }
 
-async fn fetch_page(state: &AppState, url: &str) -> Result<String, JobError> {
+async fn fetch_page(state: &AdminState, url: &str) -> Result<String, JobError> {
     let mut request = state
         .http_client
         .get(url)

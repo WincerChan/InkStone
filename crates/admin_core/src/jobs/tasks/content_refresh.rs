@@ -4,13 +4,13 @@ use chrono::Utc;
 use tracing::{debug, warn};
 
 use crate::jobs::JobError;
-use crate::state::AppState;
+use crate::state::AdminState;
 use crate::jobs::tasks::{comments_sync, feed_index};
 use crate::jobs::tasks::feed_index::JobStats;
 
 const FEED_BACKOFF: Duration = Duration::from_secs(60);
 
-pub async fn run(state: &AppState, rebuild: bool, force: bool) -> Result<JobStats, JobError> {
+pub async fn run(state: &AdminState, rebuild: bool, force: bool) -> Result<JobStats, JobError> {
     {
         let mut health = state.admin_health.lock().await;
         health.content_refresh_last_run = Some(Utc::now());
@@ -78,7 +78,7 @@ enum RefreshTask {
 }
 
 async fn backoff_remaining(
-    state: &AppState,
+    state: &AdminState,
     now: Instant,
     task: RefreshTask,
 ) -> Option<Duration> {
@@ -93,7 +93,7 @@ async fn backoff_remaining(
     }
 }
 
-async fn set_backoff(state: &AppState, now: Instant, task: RefreshTask) {
+async fn set_backoff(state: &AdminState, now: Instant, task: RefreshTask) {
     let mut guard = state.content_refresh_backoff.lock().await;
     let next = match task {
         RefreshTask::Feed => now + FEED_BACKOFF,
@@ -103,7 +103,7 @@ async fn set_backoff(state: &AppState, now: Instant, task: RefreshTask) {
     }
 }
 
-async fn clear_backoff(state: &AppState, task: RefreshTask) {
+async fn clear_backoff(state: &AdminState, task: RefreshTask) {
     let mut guard = state.content_refresh_backoff.lock().await;
     match task {
         RefreshTask::Feed => guard.next_feed_at = None,

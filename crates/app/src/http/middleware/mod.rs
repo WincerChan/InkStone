@@ -1,4 +1,3 @@
-pub mod admin_auth;
 pub mod bid_cookie;
 pub mod public_token;
 pub mod rate_limit;

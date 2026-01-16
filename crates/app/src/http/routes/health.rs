@@ -1,53 +1,15 @@
 use axum::extract::State;
 use axum::Json;
 use serde::Serialize;
-
+use inkstone_runtime::health::{
+    DatabaseStatus, HealthModules, KudosStatus, ModuleStatus, PulseStatus, WebhookStatus,
+};
 use crate::state::AppState;
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {
     pub status: &'static str,
     pub modules: HealthModules,
-}
-
-#[derive(Debug, Serialize)]
-pub struct HealthModules {
-    pub search: ModuleStatus,
-    pub database: DatabaseStatus,
-    pub comments: ModuleStatus,
-    pub kudos: KudosStatus,
-    pub pulse: PulseStatus,
-    pub douban: ModuleStatus,
-    pub webhook: WebhookStatus,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ModuleStatus {
-    pub enabled: bool,
-}
-
-#[derive(Debug, Serialize)]
-pub struct DatabaseStatus {
-    pub configured: bool,
-}
-
-#[derive(Debug, Serialize)]
-pub struct KudosStatus {
-    pub enabled: bool,
-    pub cookie_ready: bool,
-    pub token_ready: bool,
-}
-
-#[derive(Debug, Serialize)]
-pub struct PulseStatus {
-    pub enabled: bool,
-    pub cookie_ready: bool,
-    pub token_ready: bool,
-}
-
-#[derive(Debug, Serialize)]
-pub struct WebhookStatus {
-    pub configured: bool,
 }
 
 pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
@@ -70,11 +32,6 @@ pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     let kudos_enabled = db_configured && cookie_ready && token_ready;
     let pulse_enabled = db_configured && cookie_ready && token_ready;
     let comments_enabled = db_configured;
-    let webhook_configured = state
-        .config
-        .github_webhook_secret
-        .as_ref()
-        .is_some_and(|value| !value.is_empty());
 
     Json(HealthResponse {
         status: "ok",
@@ -100,7 +57,7 @@ pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
                 enabled: db_configured,
             },
             webhook: WebhookStatus {
-                configured: webhook_configured,
+                configured: false,
             },
         },
     })
@@ -110,13 +67,11 @@ pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
 mod tests {
     use super::health;
     use axum::extract::State;
-    use chrono::Duration;
     use std::sync::Arc;
-    use crate::config::AppConfig;
-    use crate::state::{AdminHealthState, AppState, ContentRefreshBackoff};
-    use tokio::sync::Mutex;
+    use crate::state::AppState;
     use inkstone_infra::db::connect_lazy;
     use inkstone_infra::search::SearchIndex;
+    use inkstone_runtime::config::PublicConfig;
 
     fn build_state(db_configured: bool) -> AppState {
         let suffix = std::time::SystemTime::now()
@@ -131,44 +86,22 @@ mod tests {
         } else {
             None
         };
-        let config = AppConfig {
+        let config = PublicConfig {
             http_addr: "127.0.0.1:8080".parse().unwrap(),
             index_dir,
-            feed_url: "https://example.com/index.json".to_string(),
-            poll_interval: Duration::seconds(300).to_std().unwrap(),
-            douban_poll_interval: Duration::seconds(300).to_std().unwrap(),
-            comments_sync_interval: Duration::seconds(300).to_std().unwrap(),
-            request_timeout: Duration::seconds(15).to_std().unwrap(),
             max_search_limit: 50,
             database_url: None,
-            douban_max_pages: 1,
-            douban_uid: "93562087".to_string(),
-            douban_cookie: "bid=3EHqn8aRvcI".to_string(),
-            douban_user_agent: "ua".to_string(),
             cookie_secret: Some("cookie".to_string()),
             stats_secret: Some("stats".to_string()),
             search_hash_secret: None,
             public_token_secret: Some("token".to_string()),
-            github_webhook_secret: None,
-            github_discussion_webhook_secret: None,
-            github_app_id: None,
-            github_app_installation_id: None,
-            github_app_private_key: None,
-            github_repo_owner: None,
-            github_repo_name: None,
-            github_discussion_category_id: None,
             cors_allow_origins: Vec::new(),
             pulse_allowed_slds: Vec::new(),
-            admin_password_hash: None,
-            admin_token_secret: None,
         };
         AppState {
             config: Arc::new(config),
             search: Arc::new(search),
-            http_client: reqwest::Client::new(),
             db,
-            content_refresh_backoff: Arc::new(Mutex::new(ContentRefreshBackoff::default())),
-            admin_health: Arc::new(Mutex::new(AdminHealthState::default())),
         }
     }
 

@@ -8,7 +8,7 @@ use thiserror::Error;
 
 use crate::jobs::tasks::douban_crawl::{self, DoubanCategory};
 use crate::jobs::JobError;
-use crate::state::AppState;
+use crate::state::AdminState;
 use inkstone_infra::db::{
     count_recent_douban_items, fetch_douban_overview, fetch_recent_douban_items, DoubanRecentItem,
     DoubanRepoError,
@@ -87,7 +87,7 @@ pub struct DoubanRecentEntry {
 }
 
 pub async fn post_douban_refresh(
-    State(state): State<AppState>,
+    State(state): State<AdminState>,
     Query(query): Query<DoubanAdminQuery>,
 ) -> Result<Json<DoubanActionResponse>, DoubanAdminError> {
     ensure_douban_configured(&state)?;
@@ -103,7 +103,7 @@ pub async fn post_douban_refresh(
 }
 
 pub async fn post_douban_rebuild(
-    State(state): State<AppState>,
+    State(state): State<AdminState>,
     Query(query): Query<DoubanAdminQuery>,
 ) -> Result<Json<DoubanActionResponse>, DoubanAdminError> {
     ensure_douban_configured(&state)?;
@@ -119,7 +119,7 @@ pub async fn post_douban_rebuild(
 }
 
 pub async fn get_douban_status(
-    State(state): State<AppState>,
+    State(state): State<AdminState>,
     Query(query): Query<DoubanStatusQuery>,
 ) -> Result<Json<DoubanOverviewResponse>, DoubanAdminError> {
     let overview = load_overview(&state, query.limit).await?;
@@ -142,7 +142,7 @@ impl IntoResponse for DoubanAdminError {
     }
 }
 
-fn ensure_douban_configured(state: &AppState) -> Result<(), DoubanAdminError> {
+fn ensure_douban_configured(state: &AdminState) -> Result<(), DoubanAdminError> {
     if state.db.is_none() {
         return Err(DoubanAdminError::DbUnavailable);
     }
@@ -173,7 +173,7 @@ fn parse_category(value: Option<&str>) -> Result<Option<DoubanCategory>, DoubanA
 }
 
 async fn load_overview(
-    state: &AppState,
+    state: &AdminState,
     limit: Option<i64>,
 ) -> Result<DoubanOverviewResponse, DoubanAdminError> {
     let pool = state.db.as_ref().ok_or(DoubanAdminError::DbUnavailable)?;
@@ -187,7 +187,7 @@ async fn load_overview(
 }
 
 fn map_overview(
-    state: &AppState,
+    state: &AdminState,
     overview: inkstone_infra::db::DoubanOverview,
     recent_total: i64,
     recent_items: Vec<DoubanRecentItem>,

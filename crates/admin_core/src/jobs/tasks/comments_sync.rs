@@ -3,10 +3,10 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use tracing::{info, warn};
 
-use crate::config::AppConfig;
 use crate::jobs::JobError;
 use crate::jobs::tasks::feed_index::{SearchIndexEntry, parse_search_index_entries};
-use crate::state::AppState;
+use crate::state::AdminState;
+use inkstone_runtime::config::AdminConfig;
 use inkstone_core::types::slug::Slug;
 use inkstone_infra::db::{
     CommentRecord, DiscussionRecord, find_discussion_by_discussion_id, find_discussion_by_post_id,
@@ -40,7 +40,7 @@ struct CommentsConfig {
     discussion_category_id: Option<String>,
 }
 
-pub async fn run(state: &AppState, rebuild: bool) -> Result<CommentsSyncStats, JobError> {
+pub async fn run(state: &AdminState, rebuild: bool) -> Result<CommentsSyncStats, JobError> {
     {
         let mut health = state.admin_health.lock().await;
         health.comments_sync_last_run = Some(Utc::now());
@@ -122,11 +122,11 @@ pub async fn run(state: &AppState, rebuild: bool) -> Result<CommentsSyncStats, J
     Ok(stats)
 }
 
-pub fn is_enabled(config: &AppConfig) -> bool {
+pub fn is_enabled(config: &AdminConfig) -> bool {
     CommentsConfig::from_app(config).is_some()
 }
 
-pub async fn sync_discussion_by_id(state: &AppState, discussion_id: &str) -> Result<(), JobError> {
+pub async fn sync_discussion_by_id(state: &AdminState, discussion_id: &str) -> Result<(), JobError> {
     let Some(config) = CommentsConfig::from_app(&state.config) else {
         return Ok(());
     };
@@ -140,7 +140,7 @@ pub async fn sync_discussion_by_id(state: &AppState, discussion_id: &str) -> Res
 }
 
 async fn sync_discussion_with_client(
-    state: &AppState,
+    state: &AdminState,
     client: &GithubAppClient,
     discussion_id: &str,
 ) -> Result<(), JobError> {
@@ -324,7 +324,7 @@ fn flatten_comments(info: &DiscussionInfo) -> Vec<CommentRecord> {
     records
 }
 
-async fn fetch_posts(state: &AppState) -> Result<Vec<PostRef>, JobError> {
+async fn fetch_posts(state: &AdminState) -> Result<Vec<PostRef>, JobError> {
     let response = state
         .http_client
         .get(&state.config.feed_url)
@@ -585,7 +585,7 @@ fn decode_html_entities(input: &str) -> String {
 }
 
 impl CommentsConfig {
-    fn from_app(config: &AppConfig) -> Option<Self> {
+    fn from_app(config: &AdminConfig) -> Option<Self> {
         Some(Self {
             app_id: config.github_app_id?,
             installation_id: config.github_app_installation_id?,

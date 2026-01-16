@@ -6,7 +6,7 @@ use chrono::{Duration, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::state::AppState;
+use crate::state::AdminState;
 use inkstone_infra::db::{
     fetch_filter_usage, fetch_keyword_usage, fetch_search_daily, fetch_search_summary,
     fetch_top_categories, fetch_top_queries, fetch_top_tags, SearchDailyRow, SearchDimCountRow,
@@ -107,7 +107,7 @@ pub struct SearchKeywordEntry {
 }
 
 pub async fn get_search_stats(
-    State(state): State<AppState>,
+    State(state): State<AdminState>,
     Query(query): Query<SearchStatsQuery>,
 ) -> Result<Json<SearchStatsResponse>, SearchStatsError> {
     let (from, to) = parse_range(query.from.as_deref(), query.to.as_deref())?;

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::http::middleware::admin_auth;
-use crate::state::AppState;
+use crate::state::AdminState;
 
 const DEFAULT_REMEMBER_DAYS: i64 = 7;
 const MAX_REMEMBER_DAYS: i64 = 30;
@@ -48,7 +48,7 @@ struct ErrorBody {
 }
 
 pub async fn login(
-    State(state): State<AppState>,
+    State(state): State<AdminState>,
     headers: HeaderMap,
     Json(payload): Json<AdminLoginRequest>,
 ) -> Result<Response, AdminLoginError> {

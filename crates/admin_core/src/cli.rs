@@ -3,7 +3,7 @@ use clap::{Parser, ValueEnum};
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
 pub struct Cli {
-    #[arg(long, default_value = "all")]
+    #[arg(long, default_value = "admin")]
     pub mode: Mode,
     #[arg(long, default_value_t = false)]
     pub rebuild: bool,
@@ -13,16 +13,17 @@ pub struct Cli {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum Mode {
-    All,
-    #[value(alias = "api")]
-    Public,
     Admin,
     Worker,
 }
 
 impl Mode {
     pub fn run_worker(self) -> bool {
-        matches!(self, Mode::All | Mode::Admin | Mode::Worker)
+        matches!(self, Mode::Admin | Mode::Worker)
+    }
+
+    pub fn run_http(self) -> bool {
+        matches!(self, Mode::Admin)
     }
 }
 
@@ -33,7 +34,7 @@ mod tests {
 
     #[test]
     fn parse_rebuild_schema_flag() {
-        let cli = Cli::try_parse_from(["inkstone-app", "--rebuild-schema"]).unwrap();
+        let cli = Cli::try_parse_from(["inkstone-admin", "--rebuild-schema"]).unwrap();
         assert!(cli.rebuild_schema);
         assert!(!cli.rebuild);
     }

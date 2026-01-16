@@ -12,7 +12,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 name = "admin"
 version = "0.1.0"
 dependencies = [
- "inkstone-app",
+ "inkstone-admin-core",
  "tokio",
 ]
 
@@ -1395,6 +1395,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "inkstone-admin-core"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "axum",
+ "base64",
+ "chrono",
+ "clap",
+ "hex",
+ "hmac",
+ "inkstone-core",
+ "inkstone-infra",
+ "inkstone-runtime",
+ "rand 0.8.5",
+ "reqwest",
+ "scraper",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
+ "tokio",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "inkstone-app"
 version = "0.1.0"
 dependencies = [
@@ -1407,6 +1435,7 @@ dependencies = [
  "hmac",
  "inkstone-core",
  "inkstone-infra",
+ "inkstone-runtime",
  "rand 0.8.5",
  "reqwest",
  "scraper",
@@ -1444,6 +1473,14 @@ dependencies = [
  "tantivy",
  "thiserror 1.0.69",
  "uuid",
+]
+
+[[package]]
+name = "inkstone-runtime"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
