@@ -1,0 +1,8 @@
+[package]
+name = "public"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+inkstone-app = { path = "../app" }
+tokio = { version = "1", features = ["full"] }

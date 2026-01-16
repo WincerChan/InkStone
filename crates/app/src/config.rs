@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use thiserror::Error;
-
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub http_addr: SocketAddr,
@@ -23,7 +22,6 @@ pub struct AppConfig {
     pub stats_secret: Option<String>,
     pub search_hash_secret: Option<String>,
     pub public_token_secret: Option<String>,
-    pub kudos_flush_interval: Duration,
     pub github_webhook_secret: Option<String>,
     pub github_discussion_webhook_secret: Option<String>,
     pub github_app_id: Option<u64>,
@@ -85,7 +83,6 @@ impl AppConfig {
         let stats_secret = read_optional_string("INKSTONE_STATS_SECRET")?;
         let search_hash_secret = read_optional_string("INKSTONE_SEARCH_HASH_SECRET")?;
         let public_token_secret = read_optional_string("INKSTONE_PUBLIC_TOKEN_SECRET")?;
-        let kudos_flush_secs = read_u64("INKSTONE_KUDOS_FLUSH_SECS", 60)?;
         let github_webhook_secret = read_optional_string("INKSTONE_GITHUB_WEBHOOK_SECRET")?;
         let github_discussion_webhook_secret =
             read_optional_string("INKSTONE_GITHUB_DISCUSSION_WEBHOOK_SECRET")?;
@@ -120,7 +117,6 @@ impl AppConfig {
             stats_secret,
             search_hash_secret,
             public_token_secret,
-            kudos_flush_interval: Duration::from_secs(kudos_flush_secs),
             github_webhook_secret,
             github_discussion_webhook_secret,
             github_app_id,

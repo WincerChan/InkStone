@@ -1,22 +1,28 @@
-use std::path::Path;
+use std::collections::{BTreeMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use inkstone_core::domain::search::{SearchDocument, SearchHit, SearchQuery, SearchResult};
 use std::ops::Bound;
 use tantivy::collector::{Count, TopDocs};
-use tantivy::query::{
-    AllQuery, BooleanQuery, EmptyQuery, Occur, PhraseQuery, Query, RangeQuery, TermQuery,
-};
+use tantivy::query::{AllQuery, BooleanQuery, EmptyQuery, Occur, Query, RangeQuery, TermQuery};
 use tantivy::schema::{
     Field, IndexRecordOption, Schema, SchemaBuilder, TextFieldIndexing, TextOptions, Value, FAST,
     STORED, STRING,
 };
 use tantivy::snippet::SnippetGenerator;
-use tantivy::tokenizer::{LowerCaser, RemoveLongFilter, Stemmer, TextAnalyzer};
-use tantivy::{DocAddress, Index, IndexReader, Order, ReloadPolicy, TantivyDocument, Term};
+use tantivy::tokenizer::{
+    LowerCaser, NgramTokenizer, RemoveLongFilter, SimpleTokenizer, Stemmer, TextAnalyzer, Token,
+    TokenStream, Tokenizer,
+};
+use tantivy::{DocAddress, Index, IndexReader, Order, ReloadPolicy, Score, TantivyDocument, Term};
 use thiserror::Error;
 
 use super::SearchSort;
+
+const TOKENIZER_CJK_BG: &str = "cjk_bg";
+const TOKENIZER_CJK_UG: &str = "cjk_ug";
+const TOKENIZER_LATIN: &str = "latin";
 
 #[derive(Debug, Error)]
 pub enum SearchIndexError {
@@ -24,6 +30,8 @@ pub enum SearchIndexError {
     Io(#[from] std::io::Error),
     #[error("tantivy error: {0}")]
     Tantivy(#[from] tantivy::TantivyError),
+    #[error("missing search index at {0}")]
+    MissingIndex(PathBuf),
     #[error("missing tokenizer: {0}")]
     MissingTokenizer(&'static str),
     #[error("missing field in schema: {0}")]
@@ -40,6 +48,15 @@ struct SearchFields {
     title: Field,
     subtitle: Field,
     content: Field,
+    title_cjk_bg: Option<Field>,
+    subtitle_cjk_bg: Option<Field>,
+    content_cjk_bg: Option<Field>,
+    title_cjk_ug: Option<Field>,
+    subtitle_cjk_ug: Option<Field>,
+    content_cjk_ug: Option<Field>,
+    title_latin: Option<Field>,
+    subtitle_latin: Option<Field>,
+    content_latin: Option<Field>,
     url: Field,
     tags: Field,
     category: Field,
@@ -61,7 +78,18 @@ pub struct SearchIndexStats {
 }
 
 impl SearchIndex {
-    pub fn open_or_create(path: impl AsRef<Path>) -> Result<Self, SearchIndexError> {
+    pub fn open_existing(path: impl AsRef<Path>) -> Result<Self, SearchIndexError> {
+        let dir = path.as_ref();
+        if !dir.exists() || !dir.join("meta.json").exists() {
+            return Err(SearchIndexError::MissingIndex(dir.to_path_buf()));
+        }
+        let index = Index::open_in_dir(dir)?;
+        Self::open_from_index(index)
+    }
+
+    pub fn open_or_create(
+        path: impl AsRef<Path>,
+    ) -> Result<Self, SearchIndexError> {
         let dir = path.as_ref();
         std::fs::create_dir_all(dir)?;
 
@@ -71,7 +99,11 @@ impl SearchIndex {
         } else {
             Index::create_in_dir(dir, schema)?
         };
-        register_jieba_tokenizer(&index);
+        Self::open_from_index(index)
+    }
+
+    fn open_from_index(index: Index) -> Result<Self, SearchIndexError> {
+        register_tokenizers(&index)?;
         let schema = index.schema();
         let fields = SearchFields::from_schema(&schema)?;
         let reader = index
@@ -94,21 +126,15 @@ impl SearchIndex {
     ) -> Result<SearchResult, SearchIndexError> {
         let searcher = self.reader.searcher();
         let built_query = build_query(&self.index, &self.fields, query)?;
-        let (title_snippet, subtitle_snippet, content_snippet) =
-            if let Some(keyword_query) = built_query.keyword.as_ref() {
-                let mut title_snippet =
-                    SnippetGenerator::create(&searcher, &**keyword_query, self.fields.title)?;
-                title_snippet.set_max_num_chars(240);
-                let mut subtitle_snippet =
-                    SnippetGenerator::create(&searcher, &**keyword_query, self.fields.subtitle)?;
-                subtitle_snippet.set_max_num_chars(240);
-                let mut content_snippet =
-                    SnippetGenerator::create(&searcher, &**keyword_query, self.fields.content)?;
-                content_snippet.set_max_num_chars(240);
-                (Some(title_snippet), Some(subtitle_snippet), Some(content_snippet))
-            } else {
-                (None, None, None)
-            };
+        let highlight_snippets = build_highlight_snippets(query, &self.fields)?;
+        let (title_snippet, subtitle_snippet, content_snippet) = match highlight_snippets.as_ref() {
+            Some(snippets) => (
+                Some(&snippets.title),
+                Some(&snippets.subtitle),
+                Some(&snippets.content),
+            ),
+            None => (None, None, None),
+        };
         let total = searcher.search(&built_query.query, &Count)?;
         let docs: Vec<DocAddress> = match sort {
             SearchSort::Relevance => searcher
@@ -135,9 +161,9 @@ impl SearchIndex {
             let doc: TantivyDocument = searcher.doc(address)?;
             hits.push(self.document_to_hit(
                 &doc,
-                title_snippet.as_ref(),
-                subtitle_snippet.as_ref(),
-                content_snippet.as_ref(),
+                title_snippet,
+                subtitle_snippet,
+                content_snippet,
             )?);
         }
 
@@ -203,6 +229,45 @@ impl SearchIndex {
         document.add_i64(self.fields.published, doc.published_at.timestamp());
         document.add_i64(self.fields.updated, doc.updated_at.timestamp());
         document.add_text(self.fields.checksum, &doc.checksum);
+        if self.fields.title_cjk_bg.is_some() || self.fields.title_cjk_ug.is_some() {
+            let normalized = normalize_cjk(&doc.title);
+            if let Some(field) = self.fields.title_cjk_bg {
+                document.add_text(field, &normalized);
+            }
+            if let Some(field) = self.fields.title_cjk_ug {
+                document.add_text(field, &normalized);
+            }
+        }
+        if self.fields.subtitle_cjk_bg.is_some() || self.fields.subtitle_cjk_ug.is_some() {
+            let normalized = doc.subtitle.as_deref().map(normalize_cjk).unwrap_or_default();
+            if let Some(field) = self.fields.subtitle_cjk_bg {
+                document.add_text(field, &normalized);
+            }
+            if let Some(field) = self.fields.subtitle_cjk_ug {
+                document.add_text(field, &normalized);
+            }
+        }
+        if self.fields.content_cjk_bg.is_some() || self.fields.content_cjk_ug.is_some() {
+            let normalized = normalize_cjk(&doc.content);
+            if let Some(field) = self.fields.content_cjk_bg {
+                document.add_text(field, &normalized);
+            }
+            if let Some(field) = self.fields.content_cjk_ug {
+                document.add_text(field, &normalized);
+            }
+        }
+        if let Some(field) = self.fields.title_latin {
+            let normalized = normalize_latin(&doc.title);
+            document.add_text(field, &normalized);
+        }
+        if let Some(field) = self.fields.subtitle_latin {
+            let normalized = doc.subtitle.as_deref().map(normalize_latin).unwrap_or_default();
+            document.add_text(field, &normalized);
+        }
+        if let Some(field) = self.fields.content_latin {
+            let normalized = normalize_latin(&doc.content);
+            document.add_text(field, &normalized);
+        }
         document
     }
 
@@ -293,6 +358,15 @@ impl SearchFields {
             content: schema
                 .get_field("content")
                 .map_err(|_| SearchIndexError::MissingField("content"))?,
+            title_cjk_bg: schema.get_field("title_cjk_bg").ok(),
+            subtitle_cjk_bg: schema.get_field("subtitle_cjk_bg").ok(),
+            content_cjk_bg: schema.get_field("content_cjk_bg").ok(),
+            title_cjk_ug: schema.get_field("title_cjk_ug").ok(),
+            subtitle_cjk_ug: schema.get_field("subtitle_cjk_ug").ok(),
+            content_cjk_ug: schema.get_field("content_cjk_ug").ok(),
+            title_latin: schema.get_field("title_latin").ok(),
+            subtitle_latin: schema.get_field("subtitle_latin").ok(),
+            content_latin: schema.get_field("content_latin").ok(),
             url: schema
                 .get_field("url")
                 .map_err(|_| SearchIndexError::MissingField("url"))?,
@@ -318,9 +392,23 @@ impl SearchFields {
 fn build_schema() -> Schema {
     let mut builder = SchemaBuilder::default();
     builder.add_text_field("id", STRING | STORED);
-    builder.add_text_field("title", jieba_text_options(true));
-    builder.add_text_field("subtitle", jieba_text_options(true));
-    builder.add_text_field("content", jieba_text_options(true));
+    let (title_opts, subtitle_opts, content_opts) = (
+        stored_text_options(),
+        stored_text_options(),
+        stored_text_options(),
+    );
+    builder.add_text_field("title", title_opts);
+    builder.add_text_field("subtitle", subtitle_opts);
+    builder.add_text_field("content", content_opts);
+    builder.add_text_field("title_cjk_bg", cjk_bigram_text_options(false, false));
+    builder.add_text_field("subtitle_cjk_bg", cjk_bigram_text_options(false, false));
+    builder.add_text_field("content_cjk_bg", cjk_bigram_text_options(false, false));
+    builder.add_text_field("title_cjk_ug", cjk_unigram_text_options(false, false));
+    builder.add_text_field("subtitle_cjk_ug", cjk_unigram_text_options(false, false));
+    builder.add_text_field("content_cjk_ug", cjk_unigram_text_options(false, false));
+    builder.add_text_field("title_latin", latin_text_options(false, false));
+    builder.add_text_field("subtitle_latin", latin_text_options(false, false));
+    builder.add_text_field("content_latin", latin_text_options(false, false));
     builder.add_text_field("url", STRING | STORED);
     builder.add_text_field("tags", STRING | STORED);
     builder.add_text_field("category", STRING | STORED);
@@ -330,10 +418,45 @@ fn build_schema() -> Schema {
     builder.build()
 }
 
-fn jieba_text_options(stored: bool) -> TextOptions {
+fn stored_text_options() -> TextOptions {
+    TextOptions::default().set_stored()
+}
+
+fn cjk_bigram_text_options(stored: bool, with_positions: bool) -> TextOptions {
+    let option = if with_positions {
+        IndexRecordOption::WithFreqsAndPositions
+    } else {
+        IndexRecordOption::WithFreqs
+    };
+    text_options(TOKENIZER_CJK_BG, stored, option)
+}
+
+fn cjk_unigram_text_options(stored: bool, with_positions: bool) -> TextOptions {
+    let option = if with_positions {
+        IndexRecordOption::WithFreqsAndPositions
+    } else {
+        IndexRecordOption::WithFreqs
+    };
+    text_options(TOKENIZER_CJK_UG, stored, option)
+}
+
+fn latin_text_options(stored: bool, with_positions: bool) -> TextOptions {
+    let option = if with_positions {
+        IndexRecordOption::WithFreqsAndPositions
+    } else {
+        IndexRecordOption::WithFreqs
+    };
+    text_options(TOKENIZER_LATIN, stored, option)
+}
+
+fn text_options(
+    tokenizer: &'static str,
+    stored: bool,
+    index_option: IndexRecordOption,
+) -> TextOptions {
     let indexing = TextFieldIndexing::default()
-        .set_tokenizer("jieba")
-        .set_index_option(IndexRecordOption::WithFreqsAndPositions);
+        .set_tokenizer(tokenizer)
+        .set_index_option(index_option);
     let options = TextOptions::default().set_indexing_options(indexing);
     if stored {
         options.set_stored()
@@ -342,14 +465,40 @@ fn jieba_text_options(stored: bool) -> TextOptions {
     }
 }
 
-fn register_jieba_tokenizer(index: &Index) {
-    let tokenizer = tantivy_jieba::JiebaTokenizer {};
-    let analyzer = TextAnalyzer::builder(tokenizer)
+fn register_tokenizers(index: &Index) -> Result<(), SearchIndexError> {
+    let analyzer = build_cjk_bigram_analyzer()?;
+    index.tokenizers().register(TOKENIZER_CJK_BG, analyzer);
+    let analyzer = build_cjk_unigram_analyzer()?;
+    index.tokenizers().register(TOKENIZER_CJK_UG, analyzer);
+    let analyzer = build_latin_analyzer();
+    index.tokenizers().register(TOKENIZER_LATIN, analyzer);
+    Ok(())
+}
+
+fn build_cjk_bigram_analyzer() -> Result<TextAnalyzer, SearchIndexError> {
+    build_cjk_ngram_analyzer(2, 2)
+}
+
+fn build_cjk_unigram_analyzer() -> Result<TextAnalyzer, SearchIndexError> {
+    build_cjk_ngram_analyzer(1, 1)
+}
+
+fn build_cjk_ngram_analyzer(
+    min_gram: usize,
+    max_gram: usize,
+) -> Result<TextAnalyzer, SearchIndexError> {
+    let tokenizer = NgramTokenizer::all_ngrams(min_gram, max_gram)?;
+    Ok(TextAnalyzer::builder(tokenizer)
+        .filter(LowerCaser)
+        .build())
+}
+
+fn build_latin_analyzer() -> TextAnalyzer {
+    TextAnalyzer::builder(SimpleTokenizer::default())
         .filter(RemoveLongFilter::limit(40))
         .filter(LowerCaser)
         .filter(Stemmer::default())
-        .build();
-    index.tokenizers().register("jieba", analyzer);
+        .build()
 }
 
 fn build_query(
@@ -359,8 +508,8 @@ fn build_query(
 ) -> Result<BuiltQuery, SearchIndexError> {
     let mut clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
 
-    let keyword_query = build_keyword_query(index, fields, query)?;
-    if let Some(keyword_query) = keyword_query.as_ref() {
+    let search_keyword_query = build_keyword_query(index, fields, query)?;
+    if let Some(keyword_query) = search_keyword_query.as_ref() {
         clauses.push((Occur::Must, keyword_query.box_clone()));
     }
 
@@ -391,17 +540,18 @@ fn build_query(
         }
     }
 
-    let query: Box<dyn Query> = if clauses.is_empty() {
+    let compiled_query: Box<dyn Query> = if clauses.is_empty() {
         Box::new(AllQuery)
     } else {
         Box::new(BooleanQuery::from(clauses))
     };
-    Ok(BuiltQuery { query, keyword: keyword_query })
+    Ok(BuiltQuery {
+        query: compiled_query,
+    })
 }
 
 struct BuiltQuery {
     query: Box<dyn Query>,
-    keyword: Option<Box<dyn Query>>,
 }
 
 fn build_keyword_query(
@@ -412,125 +562,272 @@ fn build_keyword_query(
     if query.keywords.is_empty() {
         return Ok(None);
     }
-    let mut analyzer = index
-        .tokenizers()
-        .get("jieba")
-        .ok_or(SearchIndexError::MissingTokenizer("jieba"))?;
-    let mut keyword_queries = Vec::new();
-    for keyword in &query.keywords {
-        let tokens = tokenize_keyword(&mut analyzer, keyword);
-        let title_query = build_field_query(fields.title, &tokens);
-        let subtitle_query = build_field_query(fields.subtitle, &tokens);
-        let content_query = build_field_query(fields.content, &tokens);
-        let mut clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
-        if let Some(query) = title_query {
-            clauses.push((Occur::Should, query));
-        }
-        if let Some(query) = subtitle_query {
-            clauses.push((Occur::Should, query));
-        }
-        if let Some(query) = content_query {
-            clauses.push((Occur::Should, query));
-        }
-        if !keyword.is_empty() {
-            let tag_query = TermQuery::new(
-                Term::from_field_text(fields.tags, keyword),
-                IndexRecordOption::Basic,
-            );
-            clauses.push((Occur::Should, Box::new(tag_query)));
-            let category_query = TermQuery::new(
-                Term::from_field_text(fields.category, keyword),
-                IndexRecordOption::Basic,
-            );
-            clauses.push((Occur::Should, Box::new(category_query)));
-        }
-        if should_add_raw_keyword(keyword) {
-            clauses.push((
-                Occur::Should,
-                Box::new(TermQuery::new(
-                    Term::from_field_text(fields.title, keyword),
-                    IndexRecordOption::WithFreqs,
-                )),
-            ));
-            clauses.push((
-                Occur::Should,
-                Box::new(TermQuery::new(
-                    Term::from_field_text(fields.subtitle, keyword),
-                    IndexRecordOption::WithFreqs,
-                )),
-            ));
-            clauses.push((
-                Occur::Should,
-                Box::new(TermQuery::new(
-                    Term::from_field_text(fields.content, keyword),
-                    IndexRecordOption::WithFreqs,
-                )),
-            ));
-        }
-        let keyword_query = if clauses.is_empty() {
-            None
-        } else {
-            Some(Box::new(BooleanQuery::new(clauses)) as Box<dyn Query>)
-        };
-        if let Some(keyword_query) = keyword_query {
-            keyword_queries.push(keyword_query);
-        }
-    }
+    build_ngram_keyword_query(index, fields, query)
+}
 
-    if keyword_queries.is_empty() {
+fn build_ngram_keyword_query(
+    index: &Index,
+    fields: &SearchFields,
+    query: &SearchQuery,
+) -> Result<Option<Box<dyn Query>>, SearchIndexError> {
+    let keyword_text = query.keywords.join(" ");
+    let trimmed = keyword_text.trim();
+    if trimmed.is_empty() {
         return Ok(Some(Box::new(EmptyQuery)));
     }
-    if keyword_queries.len() == 1 {
-        Ok(Some(keyword_queries.remove(0)))
+    let has_non_single_cjk_keyword = query.keywords.iter().any(|keyword| {
+        let keyword = keyword.trim();
+        if keyword.is_empty() {
+            return false;
+        }
+        let cjk_text = normalize_cjk(keyword);
+        let latin_raw = extract_latin_tokens(keyword);
+        let is_single_cjk_only = cjk_text.chars().count() == 1 && latin_raw.is_empty();
+        !is_single_cjk_only
+    });
+
+    let mut clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
+    for keyword in &query.keywords {
+        let keyword = keyword.trim();
+        if keyword.is_empty() {
+            continue;
+        }
+        let mut keyword_clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
+
+        let cjk_text = normalize_cjk(keyword);
+        let latin_raw = extract_latin_tokens(keyword);
+        let is_single_cjk_only = cjk_text.chars().count() == 1 && latin_raw.is_empty();
+        if !cjk_text.is_empty() {
+            let cjk_len = cjk_text.chars().count();
+            let (
+                tokenizer,
+                title_field,
+                subtitle_field,
+                content_field,
+                title_name,
+                subtitle_name,
+                content_name,
+            ) = if cjk_len >= 2 {
+                (
+                    TOKENIZER_CJK_BG,
+                    fields.title_cjk_bg,
+                    fields.subtitle_cjk_bg,
+                    fields.content_cjk_bg,
+                    "title_cjk_bg",
+                    "subtitle_cjk_bg",
+                    "content_cjk_bg",
+                )
+            } else {
+                (
+                    TOKENIZER_CJK_UG,
+                    fields.title_cjk_ug,
+                    fields.subtitle_cjk_ug,
+                    fields.content_cjk_ug,
+                    "title_cjk_ug",
+                    "subtitle_cjk_ug",
+                    "content_cjk_ug",
+                )
+            };
+            let mut analyzer = index
+                .tokenizers()
+                .get(tokenizer)
+                .ok_or(SearchIndexError::MissingTokenizer(tokenizer))?;
+            let tokens = dedup_terms(tokenize_terms(&mut analyzer, &cjk_text));
+            if !tokens.is_empty() {
+                let title = require_field(title_field, title_name)?;
+                let subtitle = require_field(subtitle_field, subtitle_name)?;
+                let content = require_field(content_field, content_name)?;
+                if let Some(query) = build_ngram_tokens_query(title, subtitle, content, &tokens) {
+                    keyword_clauses.push((Occur::Must, query));
+                }
+            }
+        }
+
+        if !latin_raw.is_empty() {
+            let latin_text = latin_raw.join(" ");
+            let mut analyzer = index
+                .tokenizers()
+                .get(TOKENIZER_LATIN)
+                .ok_or(SearchIndexError::MissingTokenizer(TOKENIZER_LATIN))?;
+            let tokens = dedup_terms(tokenize_terms(&mut analyzer, &latin_text));
+            if !tokens.is_empty() {
+                let title = require_field(fields.title_latin, "title_latin")?;
+                let subtitle = require_field(fields.subtitle_latin, "subtitle_latin")?;
+                let content = require_field(fields.content_latin, "content_latin")?;
+                if let Some(query) = build_ngram_tokens_query(title, subtitle, content, &tokens) {
+                    keyword_clauses.push((Occur::Must, query));
+                }
+            }
+        }
+
+        let keyword_query = if keyword_clauses.is_empty() {
+            None
+        } else if keyword_clauses.len() == 1 {
+            Some(keyword_clauses.remove(0).1)
+        } else {
+            Some(Box::new(BooleanQuery::new(keyword_clauses)) as Box<dyn Query>)
+        };
+        if let Some(keyword_query) = keyword_query {
+            let occur = if is_single_cjk_only && has_non_single_cjk_keyword {
+                Occur::Should
+            } else {
+                Occur::Must
+            };
+            clauses.push((occur, keyword_query));
+        }
+
+        let tag_query = TermQuery::new(
+            Term::from_field_text(fields.tags, keyword),
+            IndexRecordOption::Basic,
+        );
+        clauses.push((Occur::Should, Box::new(tag_query)));
+        let category_query = TermQuery::new(
+            Term::from_field_text(fields.category, keyword),
+            IndexRecordOption::Basic,
+        );
+        clauses.push((Occur::Should, Box::new(category_query)));
+    }
+
+    if clauses.is_empty() {
+        Ok(Some(Box::new(EmptyQuery)))
+    } else if clauses.len() == 1 {
+        Ok(Some(clauses.remove(0).1))
     } else {
-        Ok(Some(Box::new(BooleanQuery::new(
-            keyword_queries
-                .into_iter()
-                .map(|query| (Occur::Should, query))
-                .collect(),
-        ))))
+        Ok(Some(Box::new(BooleanQuery::new(clauses))))
     }
 }
 
-fn should_add_raw_keyword(keyword: &str) -> bool {
-    let trimmed = keyword.trim();
-    if trimmed.is_empty() || trimmed.chars().count() > 40 {
-        return false;
-    }
-    !trimmed.chars().any(|ch| ch.is_whitespace())
-}
-
-fn tokenize_keyword(
-    analyzer: &mut TextAnalyzer,
-    keyword: &str,
-) -> Vec<(usize, String)> {
-    let mut stream = analyzer.token_stream(keyword);
+fn tokenize_terms(analyzer: &mut TextAnalyzer, text: &str) -> Vec<String> {
+    let mut stream = analyzer.token_stream(text);
     let mut tokens = Vec::new();
     while stream.advance() {
         let token = stream.token();
         if token.text.trim().is_empty() {
             continue;
         }
-        tokens.push((token.position, token.text.to_string()));
+        tokens.push(token.text.to_string());
     }
     tokens
 }
 
-fn build_field_query(field: Field, tokens: &[(usize, String)]) -> Option<Box<dyn Query>> {
-    match tokens.len() {
-        0 => None,
-        1 => Some(Box::new(TermQuery::new(
-            Term::from_field_text(field, &tokens[0].1),
-            IndexRecordOption::WithFreqs,
-        ))),
-        _ => {
-            let terms = tokens
-                .iter()
-                .map(|(pos, text)| (*pos, Term::from_field_text(field, text)))
-                .collect();
-            Some(Box::new(PhraseQuery::new_with_offset(terms)))
+fn build_ngram_tokens_query(
+    title: Field,
+    subtitle: Field,
+    content: Field,
+    tokens: &[String],
+) -> Option<Box<dyn Query>> {
+    if tokens.is_empty() {
+        return None;
+    }
+    let mut clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
+    for token in tokens {
+        let mut token_clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
+        let term = Term::from_field_text(title, token);
+        token_clauses.push((
+            Occur::Should,
+            Box::new(TermQuery::new(term, IndexRecordOption::WithFreqs)),
+        ));
+        let term = Term::from_field_text(subtitle, token);
+        token_clauses.push((
+            Occur::Should,
+            Box::new(TermQuery::new(term, IndexRecordOption::WithFreqs)),
+        ));
+        let term = Term::from_field_text(content, token);
+        token_clauses.push((
+            Occur::Should,
+            Box::new(TermQuery::new(term, IndexRecordOption::WithFreqs)),
+        ));
+        clauses.push((Occur::Must, Box::new(BooleanQuery::new(token_clauses))));
+    }
+    if clauses.is_empty() {
+        None
+    } else {
+        Some(Box::new(BooleanQuery::new(clauses)))
+    }
+}
+
+fn dedup_terms(tokens: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    tokens
+        .into_iter()
+        .filter(|token| seen.insert(token.clone()))
+        .collect()
+}
+
+fn normalize_cjk(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    for ch in input.chars() {
+        if is_cjk_char(ch) {
+            output.push(ch);
         }
     }
+    output
+}
+
+fn normalize_latin(input: &str) -> String {
+    extract_latin_tokens(input).join(" ")
+}
+
+fn extract_latin_tokens(input: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() {
+            current.push(ch.to_ascii_lowercase());
+        } else if !current.is_empty() {
+            tokens.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+fn extract_display_latin_terms(input: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    for ch in input.chars() {
+        if is_display_latin(ch) {
+            current.push(ch.to_ascii_lowercase());
+        } else if !current.is_empty() {
+            tokens.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+fn cjk_bigrams(text: &str) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() < 2 {
+        return Vec::new();
+    }
+    chars
+        .windows(2)
+        .map(|pair| pair.iter().collect())
+        .collect()
+}
+
+fn require_field(field: Option<Field>, name: &'static str) -> Result<Field, SearchIndexError> {
+    field.ok_or(SearchIndexError::MissingField(name))
+}
+
+fn is_cjk_char(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{3007}'
+            | '\u{3400}'..='\u{4DBF}'
+            | '\u{4E00}'..='\u{9FFF}'
+            | '\u{F900}'..='\u{FAFF}'
+            | '\u{20000}'..='\u{2A6DF}'
+            | '\u{2A700}'..='\u{2B73F}'
+            | '\u{2B740}'..='\u{2B81F}'
+            | '\u{2B820}'..='\u{2CEAF}'
+            | '\u{2F800}'..='\u{2FA1F}'
+    )
 }
 
 fn build_range_query(field: Field, start: Option<i64>, end: Option<i64>) -> Box<dyn Query> {
@@ -563,6 +860,244 @@ fn get_strings(doc: &TantivyDocument, field: Field) -> Vec<String> {
 
 fn get_i64(doc: &TantivyDocument, field: Field) -> Option<i64> {
     doc.get_first(field)?.as_i64()
+}
+
+struct HighlightSnippets {
+    title: SnippetGenerator,
+    subtitle: SnippetGenerator,
+    content: SnippetGenerator,
+}
+
+fn build_highlight_snippets(
+    query: &SearchQuery,
+    fields: &SearchFields,
+) -> Result<Option<HighlightSnippets>, SearchIndexError> {
+    let Some(terms_text) = build_highlight_terms(query) else {
+        return Ok(None);
+    };
+    let analyzer = build_highlight_analyzer();
+    let max_chars = 240;
+    Ok(Some(HighlightSnippets {
+        title: SnippetGenerator::new(
+            terms_text.clone(),
+            analyzer.clone(),
+            fields.title,
+            max_chars,
+        ),
+        subtitle: SnippetGenerator::new(
+            terms_text.clone(),
+            analyzer.clone(),
+            fields.subtitle,
+            max_chars,
+        ),
+        content: SnippetGenerator::new(terms_text, analyzer, fields.content, max_chars),
+    }))
+}
+
+fn build_highlight_terms(query: &SearchQuery) -> Option<BTreeMap<String, Score>> {
+    if query.keywords.is_empty() {
+        return None;
+    }
+    let mut latin_terms = Vec::new();
+    let mut cjk_terms = Vec::new();
+    for keyword in &query.keywords {
+        let keyword = keyword.trim();
+        if keyword.is_empty() {
+            continue;
+        }
+        latin_terms.extend(extract_display_latin_terms(keyword));
+        let cjk_text = normalize_cjk(keyword);
+        let cjk_len = cjk_text.chars().count();
+        if cjk_len == 1 {
+            cjk_terms.push(cjk_text);
+        } else if cjk_len > 1 {
+            cjk_terms.extend(cjk_bigrams(&cjk_text));
+        }
+    }
+    let latin_terms = dedup_terms(latin_terms);
+    let cjk_terms = dedup_terms(cjk_terms);
+    if latin_terms.is_empty() && cjk_terms.is_empty() {
+        return None;
+    }
+    let mut terms_text = BTreeMap::new();
+    for term in &latin_terms {
+        let normalized = term.to_ascii_lowercase();
+        let weight = normalized.chars().count().max(1) as Score;
+        terms_text.entry(normalized).or_insert(weight);
+    }
+    for term in &cjk_terms {
+        let weight = term.chars().count().max(1) as Score;
+        terms_text.entry(term.clone()).or_insert(weight);
+    }
+    Some(terms_text)
+}
+
+fn build_highlight_analyzer() -> TextAnalyzer {
+    TextAnalyzer::builder(MixedDisplayTokenizer::default())
+        .filter(RemoveLongFilter::limit(80))
+        .filter(LowerCaser)
+        .build()
+}
+
+#[derive(Clone, Default)]
+pub struct MixedDisplayTokenizer;
+
+impl Tokenizer for MixedDisplayTokenizer {
+    type TokenStream<'a> = MixedDisplayTokenStream<'a>;
+
+    fn token_stream<'a>(&'a mut self, text: &'a str) -> Self::TokenStream<'a> {
+        MixedDisplayTokenStream::new(text)
+    }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq)]
+enum RunKind {
+    Latin,
+    Cjk,
+}
+
+fn classify_display_run(ch: char) -> Option<RunKind> {
+    if is_cjk_char(ch) {
+        Some(RunKind::Cjk)
+    } else if is_display_latin(ch) {
+        Some(RunKind::Latin)
+    } else {
+        None
+    }
+}
+
+fn is_display_latin(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '/' | '+' | '#')
+}
+
+pub struct MixedDisplayTokenStream<'a> {
+    tokens: Vec<Token>,
+    i: usize,
+    cur: Token,
+    _text: &'a str,
+}
+
+impl<'a> MixedDisplayTokenStream<'a> {
+    pub fn new(text: &'a str) -> Self {
+        let tokens = build_display_tokens(text);
+        Self {
+            tokens,
+            i: 0,
+            cur: Token::default(),
+            _text: text,
+        }
+    }
+}
+
+impl TokenStream for MixedDisplayTokenStream<'_> {
+    fn advance(&mut self) -> bool {
+        if self.i >= self.tokens.len() {
+            return false;
+        }
+        self.cur = self.tokens[self.i].clone();
+        self.i += 1;
+        true
+    }
+
+    fn token(&self) -> &Token {
+        &self.cur
+    }
+
+    fn token_mut(&mut self) -> &mut Token {
+        &mut self.cur
+    }
+}
+
+fn build_display_tokens(text: &str) -> Vec<Token> {
+    let mut out = Vec::new();
+    let mut run_kind: Option<RunKind> = None;
+    let mut run_start = 0usize;
+    let mut pos = 0usize;
+
+    let flush = |kind: RunKind,
+                 start: usize,
+                 end: usize,
+                 out: &mut Vec<Token>,
+                 pos: &mut usize| {
+        if start >= end {
+            return;
+        }
+        let slice = &text[start..end];
+        match kind {
+            RunKind::Latin => {
+                let mut tok = Token::default();
+                tok.offset_from = start;
+                tok.offset_to = end;
+                tok.position = *pos;
+                tok.position_length = 1;
+                tok.text = slice.to_string();
+                out.push(tok);
+                *pos += 1;
+            }
+            RunKind::Cjk => {
+                let mut idx: Vec<usize> = slice.char_indices().map(|(i, _)| i).collect();
+                idx.push(slice.len());
+                let n = idx.len().saturating_sub(1);
+                for i in 0..n {
+                    let a = start + idx[i];
+                    let b = start + idx[i + 1];
+                    let mut tok = Token::default();
+                    tok.offset_from = a;
+                    tok.offset_to = b;
+                    tok.position = *pos;
+                    tok.position_length = 1;
+                    tok.text = text[a..b].to_string();
+                    out.push(tok);
+                    *pos += 1;
+                }
+                for i in 0..n.saturating_sub(1) {
+                    let a = start + idx[i];
+                    let b = start + idx[i + 2];
+                    let mut tok = Token::default();
+                    tok.offset_from = a;
+                    tok.offset_to = b;
+                    tok.position = *pos;
+                    tok.position_length = 1;
+                    tok.text = text[a..b].to_string();
+                    out.push(tok);
+                    *pos += 1;
+                }
+            }
+        }
+    };
+
+    for (i, ch) in text.char_indices() {
+        let kind = classify_display_run(ch);
+        match (run_kind, kind) {
+            (None, Some(next)) => {
+                run_kind = Some(next);
+                run_start = i;
+            }
+            (Some(current), Some(next)) if current == next => {}
+            (Some(current), Some(next)) => {
+                flush(current, run_start, i, &mut out, &mut pos);
+                run_kind = Some(next);
+                run_start = i;
+            }
+            (Some(current), None) => {
+                flush(current, run_start, i, &mut out, &mut pos);
+                run_kind = None;
+            }
+            (None, None) => {}
+        }
+    }
+    if let Some(current) = run_kind {
+        flush(current, run_start, text.len(), &mut out, &mut pos);
+    }
+
+    out.sort_by(|left, right| {
+        (left.offset_from, left.offset_to).cmp(&(right.offset_from, right.offset_to))
+    });
+    for (idx, token) in out.iter_mut().enumerate() {
+        token.position = idx;
+        token.position_length = 1;
+    }
+    out
 }
 
 fn snippet_html(generator: Option<&SnippetGenerator>, doc: &TantivyDocument) -> Option<String> {
@@ -604,26 +1139,79 @@ mod tests {
     use super::*;
     use tantivy::collector::TopDocs;
     use tantivy::doc;
-    use tantivy::tokenizer::TokenStream;
+
+    fn add_ngram_fields(
+        doc: &mut TantivyDocument,
+        fields: &SearchFields,
+        title: &str,
+        subtitle: Option<&str>,
+        content: &str,
+    ) {
+        let title_cjk = normalize_cjk(title);
+        if let Some(field) = fields.title_cjk_bg {
+            doc.add_text(field, &title_cjk);
+        }
+        if let Some(field) = fields.title_cjk_ug {
+            doc.add_text(field, &title_cjk);
+        }
+        let subtitle_cjk = subtitle.map(normalize_cjk).unwrap_or_default();
+        if let Some(field) = fields.subtitle_cjk_bg {
+            doc.add_text(field, &subtitle_cjk);
+        }
+        if let Some(field) = fields.subtitle_cjk_ug {
+            doc.add_text(field, &subtitle_cjk);
+        }
+        let content_cjk = normalize_cjk(content);
+        if let Some(field) = fields.content_cjk_bg {
+            doc.add_text(field, &content_cjk);
+        }
+        if let Some(field) = fields.content_cjk_ug {
+            doc.add_text(field, &content_cjk);
+        }
+        let title_latin = normalize_latin(title);
+        if let Some(field) = fields.title_latin {
+            doc.add_text(field, &title_latin);
+        }
+        let subtitle_latin = subtitle.map(normalize_latin).unwrap_or_default();
+        if let Some(field) = fields.subtitle_latin {
+            doc.add_text(field, &subtitle_latin);
+        }
+        let content_latin = normalize_latin(content);
+        if let Some(field) = fields.content_latin {
+            doc.add_text(field, &content_latin);
+        }
+    }
+
+    fn build_index() -> Result<(Index, SearchFields), SearchIndexError> {
+        let schema = build_schema();
+        let index = Index::create_in_ram(schema);
+        register_tokenizers(&index)?;
+        let fields = SearchFields::from_schema(&index.schema())?;
+        Ok((index, fields))
+    }
 
     #[test]
-    fn jieba_tokenizer_searches_chinese() -> Result<(), SearchIndexError> {
-        let schema = build_schema();
-        let title = schema.get_field("title")?;
-        let subtitle = schema.get_field("subtitle")?;
-        let content = schema.get_field("content")?;
-        let index = Index::create_in_ram(schema);
-        register_jieba_tokenizer(&index);
-
+    fn ngram_search_finds_cjk_and_highlight() -> Result<(), SearchIndexError> {
+        let (index, fields) = build_index()?;
+        let title = fields.title;
+        let subtitle = fields.subtitle;
+        let content = fields.content;
         let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
-        writer.add_document(doc!(
+        let mut doc = doc!(
             title => "张华考上了北京大学；我在百货公司当售货员",
             subtitle => "副标题无关内容",
             content => "百货公司里有一个售货员正在忙碌。"
-        ))?;
+        );
+        add_ngram_fields(
+            &mut doc,
+            &fields,
+            "张华考上了北京大学；我在百货公司当售货员",
+            Some("副标题无关内容"),
+            "百货公司里有一个售货员正在忙碌。",
+        );
+        writer.add_document(doc)?;
         writer.commit()?;
 
-        let fields = SearchFields::from_schema(&index.schema())?;
         let searcher = index.reader()?.searcher();
         let search_query = SearchQuery {
             keywords: vec!["售货员".to_string()],
@@ -635,86 +1223,30 @@ mod tests {
         let doc_address = top_docs[0].1;
         let doc: TantivyDocument = searcher.doc(doc_address)?;
 
-        let keyword_query = built.keyword.as_ref().expect("keyword query");
-        let mut title_snippet = SnippetGenerator::create(&searcher, &**keyword_query, title)?;
-        title_snippet.set_max_num_chars(240);
-        let mut content_snippet = SnippetGenerator::create(&searcher, &**keyword_query, content)?;
-        content_snippet.set_max_num_chars(240);
-        let title_html = title_snippet.snippet_from_doc(&doc).to_html();
-        let content_html = content_snippet.snippet_from_doc(&doc).to_html();
+        let highlight = build_highlight_snippets(&search_query, &fields)?.expect("highlight");
+        let title_html = snippet_html(Some(&highlight.title), &doc).unwrap_or_default();
+        let content_html = snippet_html(Some(&highlight.content), &doc).unwrap_or_default();
         assert!(title_html.contains("售货员"));
         assert!(content_html.contains("售货员"));
         Ok(())
     }
 
     #[test]
-    fn jieba_tokenizer_outputs_tokens_for_content() -> Result<(), SearchIndexError> {
-        let schema = build_schema();
-        let index = Index::create_in_ram(schema);
-        register_jieba_tokenizer(&index);
-
-        let mut analyzer = index
-            .tokenizers()
-            .get("jieba")
-            .expect("jieba tokenizer");
-        let content = "临近我 28 岁生日时，我原本并没有写文章的打算。";
-        let mut stream = analyzer.token_stream(content);
-        let mut tokens = Vec::new();
-        while stream.advance() {
-            tokens.push(stream.token().text.clone());
-        }
-        println!("jieba tokens: {:?}", tokens);
-        assert!(!tokens.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn jieba_searches_three_years_phrase_in_title() -> Result<(), SearchIndexError> {
-        let schema = build_schema();
-        let title = schema.get_field("title")?;
-        let subtitle = schema.get_field("subtitle")?;
-        let content = schema.get_field("content")?;
-        let index = Index::create_in_ram(schema);
-        register_jieba_tokenizer(&index);
-
-        let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
-        writer.add_document(doc!(
-            title => "离职，三年未满",
-            subtitle => "副标题",
-            content => "正文"
-        ))?;
-        writer.commit()?;
-
-        let fields = SearchFields::from_schema(&index.schema())?;
-        let searcher = index.reader()?.searcher();
-        let search_query = SearchQuery {
-            keywords: vec!["三年".to_string()],
-            ..Default::default()
-        };
-        let built = build_query(&index, &fields, &search_query)?;
-        let top_docs = searcher.search(&built.query, &TopDocs::with_limit(5))?;
-        assert!(!top_docs.is_empty());
-        Ok(())
-    }
-
-    #[test]
     fn keyword_query_matches_subtitle() -> Result<(), SearchIndexError> {
-        let schema = build_schema();
-        let title = schema.get_field("title")?;
-        let subtitle = schema.get_field("subtitle")?;
-        let content = schema.get_field("content")?;
-        let index = Index::create_in_ram(schema);
-        register_jieba_tokenizer(&index);
-
+        let (index, fields) = build_index()?;
+        let title = fields.title;
+        let subtitle = fields.subtitle;
+        let content = fields.content;
         let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
-        writer.add_document(doc!(
+        let mut doc = doc!(
             title => "无关标题",
             subtitle => "这里有关键词",
             content => "无关正文"
-        ))?;
+        );
+        add_ngram_fields(&mut doc, &fields, "无关标题", Some("这里有关键词"), "无关正文");
+        writer.add_document(doc)?;
         writer.commit()?;
 
-        let fields = SearchFields::from_schema(&index.schema())?;
         let searcher = index.reader()?.searcher();
         let search_query = SearchQuery {
             keywords: vec!["关键词".to_string()],
@@ -723,65 +1255,29 @@ mod tests {
         let built = build_query(&index, &fields, &search_query)?;
         let top_docs = searcher.search(&built.query, &TopDocs::with_limit(5))?;
         assert!(!top_docs.is_empty());
+        let doc_address = top_docs[0].1;
+        let doc: TantivyDocument = searcher.doc(doc_address)?;
+        let subtitle_value = get_string(&doc, subtitle).unwrap_or_default();
+        assert!(subtitle_value.contains("关键词"));
         Ok(())
-    }
-
-    #[test]
-    fn keyword_query_matches_chinese_subtitle_token() -> Result<(), SearchIndexError> {
-        let schema = build_schema();
-        let title = schema.get_field("title")?;
-        let subtitle = schema.get_field("subtitle")?;
-        let content = schema.get_field("content")?;
-        let index = Index::create_in_ram(schema);
-        register_jieba_tokenizer(&index);
-
-        let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
-        writer.add_document(doc!(
-            title => "无关标题",
-            subtitle => "终究还是走上了自建的路",
-            content => "无关正文"
-        ))?;
-        writer.commit()?;
-
-        let fields = SearchFields::from_schema(&index.schema())?;
-        let searcher = index.reader()?.searcher();
-        let search_query = SearchQuery {
-            keywords: vec!["自建".to_string()],
-            ..Default::default()
-        };
-        let built = build_query(&index, &fields, &search_query)?;
-        let top_docs = searcher.search(&built.query, &TopDocs::with_limit(5))?;
-        assert!(!top_docs.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn raw_keyword_term_skips_whitespace_or_long_input() {
-        assert!(!should_add_raw_keyword("   "));
-        assert!(!should_add_raw_keyword("a b"));
-        assert!(!should_add_raw_keyword(&"a".repeat(41)));
-        assert!(should_add_raw_keyword("自建"));
-        assert!(should_add_raw_keyword("keyword"));
     }
 
     #[test]
     fn title_snippet_falls_back_to_title_text() -> Result<(), SearchIndexError> {
-        let schema = build_schema();
-        let title = schema.get_field("title")?;
-        let subtitle = schema.get_field("subtitle")?;
-        let content = schema.get_field("content")?;
-        let index = Index::create_in_ram(schema);
-        register_jieba_tokenizer(&index);
-
+        let (index, fields) = build_index()?;
+        let title = fields.title;
+        let subtitle = fields.subtitle;
+        let content = fields.content;
         let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
-        writer.add_document(doc!(
+        let mut doc = doc!(
             title => "离职，三年未满",
             subtitle => "副标题",
             content => "正文"
-        ))?;
+        );
+        add_ngram_fields(&mut doc, &fields, "离职，三年未满", Some("副标题"), "正文");
+        writer.add_document(doc)?;
         writer.commit()?;
 
-        let fields = SearchFields::from_schema(&index.schema())?;
         let searcher = index.reader()?.searcher();
         let search_query = SearchQuery {
             keywords: vec!["正文".to_string()],
@@ -792,88 +1288,275 @@ mod tests {
         let doc_address = top_docs[0].1;
         let doc: TantivyDocument = searcher.doc(doc_address)?;
 
-        let keyword_query = built.keyword.as_ref().expect("keyword query");
-        let mut title_snippet = SnippetGenerator::create(&searcher, &**keyword_query, title)?;
-        title_snippet.set_max_num_chars(240);
-        let snippet = snippet_or_excerpt(Some(&title_snippet), &doc, title, 120).unwrap();
+        let highlight = build_highlight_snippets(&search_query, &fields)?.expect("highlight");
+        let snippet = snippet_or_excerpt(Some(&highlight.title), &doc, title, 120).unwrap();
         assert!(snippet.contains("离职"));
         Ok(())
     }
 
     #[test]
-    fn keyword_query_matches_tags() -> Result<(), SearchIndexError> {
+    fn ngram_search_splits_cjk_and_latin_keywords() -> Result<(), SearchIndexError> {
+        let (index, fields) = build_index()?;
+        let title = fields.title;
+        let subtitle = fields.subtitle;
+        let content = fields.content;
+        let text = "我的 podman 自建全部服务方案";
+        let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
+        let mut doc = doc!(
+            title => text,
+            subtitle => "",
+            content => text
+        );
+        add_ngram_fields(&mut doc, &fields, text, Some(""), text);
+        writer.add_document(doc)?;
+        writer.commit()?;
+
+        let searcher = index.reader()?.searcher();
+        let search_query = SearchQuery {
+            keywords: vec![
+                "我的".to_string(),
+                "podman".to_string(),
+                "自建全部服务方案".to_string(),
+            ],
+            ..Default::default()
+        };
+        let built = build_query(&index, &fields, &search_query)?;
+        let hits = searcher.search(&built.query, &TopDocs::with_limit(5))?;
+        assert!(!hits.is_empty());
+        let doc_address = hits[0].1;
+        let doc: TantivyDocument = searcher.doc(doc_address)?;
+        let title_value = get_string(&doc, title).unwrap_or_default();
+        let content_value = get_string(&doc, content).unwrap_or_default();
+        let subtitle_value = get_string(&doc, subtitle).unwrap_or_default();
+        assert!(title_value.contains("podman") || content_value.contains("podman") || subtitle_value.contains("podman"));
+        Ok(())
+    }
+
+    #[test]
+    fn ngram_search_requires_all_keywords() -> Result<(), SearchIndexError> {
+        let (index, fields) = build_index()?;
+        let title = fields.title;
+        let content = fields.content;
+        let text = "昨天";
+        let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
+        let mut doc = doc!(
+            title => text,
+            content => text
+        );
+        add_ngram_fields(&mut doc, &fields, text, None, text);
+        writer.add_document(doc)?;
+        writer.commit()?;
+
+        let searcher = index.reader()?.searcher();
+        let search_query = SearchQuery {
+            keywords: vec!["昨天".to_string(), "今天".to_string()],
+            ..Default::default()
+        };
+        let built = build_query(&index, &fields, &search_query)?;
+        let hits = searcher.search(&built.query, &TopDocs::with_limit(5))?;
+        assert!(hits.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn ngram_search_allows_single_cjk_as_optional_with_other_keywords(
+    ) -> Result<(), SearchIndexError> {
+        let (index, fields) = build_index()?;
+        let title = fields.title;
+        let content = fields.content;
+        let text = "昨天";
+        let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
+        let mut doc = doc!(
+            title => text,
+            content => text
+        );
+        add_ngram_fields(&mut doc, &fields, text, None, text);
+        writer.add_document(doc)?;
+        writer.commit()?;
+
+        let searcher = index.reader()?.searcher();
+        let search_query = SearchQuery {
+            keywords: vec!["昨天".to_string(), "爱".to_string()],
+            ..Default::default()
+        };
+        let built = build_query(&index, &fields, &search_query)?;
+        let hits = searcher.search(&built.query, &TopDocs::with_limit(5))?;
+        assert!(!hits.is_empty());
+        let doc_address = hits[0].1;
+        let doc: TantivyDocument = searcher.doc(doc_address)?;
+        let title_value = get_string(&doc, title).unwrap_or_default();
+        let content_value = get_string(&doc, content).unwrap_or_default();
+        assert!(title_value.contains("昨天") || content_value.contains("昨天"));
+        Ok(())
+    }
+
+    #[test]
+    fn ngram_search_uses_unigram_for_single_cjk() -> Result<(), SearchIndexError> {
+        let (index, fields) = build_index()?;
+        let title = fields.title;
+        let content = fields.content;
+        let text = "我爱Rust";
+        let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
+        let mut doc = doc!(
+            title => text,
+            content => text
+        );
+        add_ngram_fields(&mut doc, &fields, text, None, text);
+        writer.add_document(doc)?;
+        writer.commit()?;
+
+        let searcher = index.reader()?.searcher();
+        let search_query = SearchQuery {
+            keywords: vec!["爱".to_string()],
+            ..Default::default()
+        };
+        let built = build_query(&index, &fields, &search_query)?;
+        let hits = searcher.search(&built.query, &TopDocs::with_limit(5))?;
+        assert!(!hits.is_empty());
+        let doc_address = hits[0].1;
+        let doc: TantivyDocument = searcher.doc(doc_address)?;
+        let title_value = get_string(&doc, title).unwrap_or_default();
+        let content_value = get_string(&doc, content).unwrap_or_default();
+        assert!(title_value.contains("爱") || content_value.contains("爱"));
+        Ok(())
+    }
+
+    #[test]
+    fn ngram_search_requires_all_tokens_for_keyword() -> Result<(), SearchIndexError> {
+        let (index, fields) = build_index()?;
+        let title = fields.title;
+        let content = fields.content;
+        let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
+        let text = "数据系统分析";
+        let mut doc = doc!(
+            title => text,
+            content => text
+        );
+        add_ngram_fields(&mut doc, &fields, text, None, text);
+        writer.add_document(doc)?;
+        let matched = "数据分析";
+        let mut doc = doc!(
+            title => matched,
+            content => matched
+        );
+        add_ngram_fields(&mut doc, &fields, matched, None, matched);
+        writer.add_document(doc)?;
+        writer.commit()?;
+
+        let searcher = index.reader()?.searcher();
+        let search_query = SearchQuery {
+            keywords: vec!["数据分析".to_string()],
+            ..Default::default()
+        };
+        let built = build_query(&index, &fields, &search_query)?;
+        let hits = searcher.search(&built.query, &TopDocs::with_limit(5))?;
+        assert_eq!(hits.len(), 1);
+        let doc_address = hits[0].1;
+        let doc: TantivyDocument = searcher.doc(doc_address)?;
+        let title_value = get_string(&doc, title).unwrap_or_default();
+        assert_eq!(title_value, matched);
+        Ok(())
+    }
+
+    #[test]
+    fn highlight_snippet_uses_display_terms() -> Result<(), SearchIndexError> {
         let schema = build_schema();
         let title = schema.get_field("title")?;
         let subtitle = schema.get_field("subtitle")?;
         let content = schema.get_field("content")?;
-        let tags = schema.get_field("tags")?;
-        let index = Index::create_in_ram(schema);
-        register_jieba_tokenizer(&index);
+        let fields = SearchFields::from_schema(&schema)?;
+        let doc: TantivyDocument = doc!(
+            title => "无关标题",
+            subtitle => "副标题",
+            content => "终究还是走上了自建的路。这是一个 suspense 故事，使用 resvg-js 渲染。"
+        );
+        let search_query = SearchQuery {
+            keywords: vec![
+                "自建".to_string(),
+                "suspense".to_string(),
+                "resvg-js".to_string(),
+            ],
+            ..Default::default()
+        };
+        let highlight = build_highlight_snippets(&search_query, &fields)?.expect("highlight");
+        let content_html = snippet_html(Some(&highlight.content), &doc).unwrap_or_default();
+        assert!(content_html.contains("<b>自建</b>"));
+        assert!(content_html.to_ascii_lowercase().contains("<b>suspense</b>"));
+        assert!(content_html.to_ascii_lowercase().contains("<b>resvg-js</b>"));
+        let title_html = snippet_html(Some(&highlight.title), &doc).unwrap_or_default();
+        assert!(!title_html.contains("<b>"));
+        Ok(())
+    }
 
+    #[test]
+    fn mixed_display_token_offsets_are_monotonic() {
+        let text = "数据分析 suspense resvg-js";
+        let mut tokenizer = MixedDisplayTokenizer::default();
+        let mut stream = tokenizer.token_stream(text);
+        let mut last_from = 0usize;
+        let mut last_to = 0usize;
+        let mut first = true;
+        while stream.advance() {
+            let token = stream.token();
+            assert!(token.offset_from <= token.offset_to);
+            if !first {
+                assert!(token.offset_from >= last_from);
+                assert!(token.offset_to >= last_to);
+            }
+            last_from = token.offset_from;
+            last_to = token.offset_to;
+            first = false;
+        }
+    }
+
+    #[test]
+    fn tag_filter_matches_tags() -> Result<(), SearchIndexError> {
+        let (index, fields) = build_index()?;
+        let title = fields.title;
+        let content = fields.content;
+        let tags = fields.tags;
         let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
-        writer.add_document(doc!(
+        let mut doc = doc!(
             title => "无关标题",
             content => "无关正文",
             tags => "售货员"
-        ))?;
+        );
+        add_ngram_fields(&mut doc, &fields, "无关标题", None, "无关正文");
+        writer.add_document(doc)?;
         writer.commit()?;
-
-        let fields = SearchFields {
-            id: index.schema().get_field("id")?,
-            title,
-            subtitle,
-            content,
-            url: index.schema().get_field("url")?,
-            tags,
-            category: index.schema().get_field("category")?,
-            published: index.schema().get_field("published")?,
-            updated: index.schema().get_field("updated")?,
-            checksum: index.schema().get_field("checksum")?,
-        };
 
         let searcher = index.reader_builder().try_into()?.searcher();
         let search_query = SearchQuery {
-            keywords: vec!["售货员".to_string()],
+            tags: vec!["售货员".to_string()],
             ..Default::default()
         };
         let built = build_query(&index, &fields, &search_query)?;
         let hits = searcher.search(&built.query, &TopDocs::with_limit(10))?;
         assert_eq!(hits.len(), 1);
+        let doc_address = hits[0].1;
+        let doc: TantivyDocument = searcher.doc(doc_address)?;
+        let tags_value = get_strings(&doc, tags);
+        assert!(tags_value.iter().any(|tag| tag == "售货员"));
         Ok(())
     }
 
     #[test]
     fn range_query_matches_updated() -> Result<(), SearchIndexError> {
-        let schema = build_schema();
-        let title = schema.get_field("title")?;
-        let subtitle = schema.get_field("subtitle")?;
-        let content = schema.get_field("content")?;
-        let published = schema.get_field("published")?;
-        let updated = schema.get_field("updated")?;
-        let index = Index::create_in_ram(schema);
-        register_jieba_tokenizer(&index);
-
+        let (index, fields) = build_index()?;
+        let title = fields.title;
+        let content = fields.content;
+        let published = fields.published;
+        let updated = fields.updated;
         let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
-        writer.add_document(doc!(
+        let mut doc = doc!(
             title => "只更新命中",
             content => "正文内容",
             published => 1_577_836_800i64,
             updated => 1_735_689_600i64
-        ))?;
+        );
+        add_ngram_fields(&mut doc, &fields, "只更新命中", None, "正文内容");
+        writer.add_document(doc)?;
         writer.commit()?;
-
-        let fields = SearchFields {
-            id: index.schema().get_field("id")?,
-            title,
-            subtitle,
-            content,
-            url: index.schema().get_field("url")?,
-            tags: index.schema().get_field("tags")?,
-            category: index.schema().get_field("category")?,
-            published,
-            updated,
-            checksum: index.schema().get_field("checksum")?,
-        };
 
         let range = inkstone_core::types::time_range::TimeRange::parse("2024-01-01~2026-01-01")
             .unwrap();
@@ -889,44 +1572,69 @@ mod tests {
     }
 
     #[test]
-    fn keyword_query_matches_category() -> Result<(), SearchIndexError> {
-        let schema = build_schema();
-        let title = schema.get_field("title")?;
-        let subtitle = schema.get_field("subtitle")?;
-        let content = schema.get_field("content")?;
-        let category = schema.get_field("category")?;
-        let index = Index::create_in_ram(schema);
-        register_jieba_tokenizer(&index);
-
+    fn category_filter_matches_category() -> Result<(), SearchIndexError> {
+        let (index, fields) = build_index()?;
+        let title = fields.title;
+        let content = fields.content;
+        let category = fields.category;
         let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
-        writer.add_document(doc!(
+        let mut doc = doc!(
             title => "无关标题",
             content => "无关正文",
             category => "实验室"
-        ))?;
+        );
+        add_ngram_fields(&mut doc, &fields, "无关标题", None, "无关正文");
+        writer.add_document(doc)?;
         writer.commit()?;
-
-        let fields = SearchFields {
-            id: index.schema().get_field("id")?,
-            title,
-            subtitle,
-            content,
-            url: index.schema().get_field("url")?,
-            tags: index.schema().get_field("tags")?,
-            category,
-            published: index.schema().get_field("published")?,
-            updated: index.schema().get_field("updated")?,
-            checksum: index.schema().get_field("checksum")?,
-        };
 
         let searcher = index.reader_builder().try_into()?.searcher();
         let search_query = SearchQuery {
-            keywords: vec!["实验室".to_string()],
+            category: Some("实验室".to_string()),
             ..Default::default()
         };
         let built = build_query(&index, &fields, &search_query)?;
         let hits = searcher.search(&built.query, &TopDocs::with_limit(10))?;
         assert_eq!(hits.len(), 1);
+        let doc_address = hits[0].1;
+        let doc: TantivyDocument = searcher.doc(doc_address)?;
+        let category_value = get_string(&doc, category).unwrap_or_default();
+        assert_eq!(category_value, "实验室");
+        Ok(())
+    }
+
+    #[test]
+    fn keyword_query_requires_all_keywords() -> Result<(), SearchIndexError> {
+        let (index, fields) = build_index()?;
+        let title = fields.title;
+        let content = fields.content;
+        let mut writer = index.writer::<TantivyDocument>(50_000_000)?;
+        let mut doc = doc!(
+            title => "Rust 语言",
+            content => "只有 Rust"
+        );
+        add_ngram_fields(&mut doc, &fields, "Rust 语言", None, "只有 Rust");
+        writer.add_document(doc)?;
+        let mut doc = doc!(
+            title => "Rust 搜索",
+            content => "Rust 搜索 都有"
+        );
+        add_ngram_fields(&mut doc, &fields, "Rust 搜索", None, "Rust 搜索 都有");
+        writer.add_document(doc)?;
+        writer.commit()?;
+
+        let searcher = index.reader_builder().try_into()?.searcher();
+        let search_query = SearchQuery {
+            keywords: vec!["Rust".to_string(), "搜索".to_string()],
+            ..Default::default()
+        };
+        let built = build_query(&index, &fields, &search_query)?;
+        let hits = searcher.search(&built.query, &TopDocs::with_limit(10))?;
+        assert_eq!(hits.len(), 1);
+        let doc_address = hits[0].1;
+        let doc: TantivyDocument = searcher.doc(doc_address)?;
+        let hit_title = get_string(&doc, title).unwrap_or_default();
+        let hit_content = get_string(&doc, content).unwrap_or_default();
+        assert!(hit_title.contains("搜索") || hit_content.contains("搜索"));
         Ok(())
     }
 }
