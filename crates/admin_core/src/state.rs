@@ -5,13 +5,13 @@ use chrono::{DateTime, Utc};
 use reqwest::Client;
 use tokio::sync::Mutex;
 
-use inkstone_app::config::AppConfig;
 use inkstone_infra::db::DbPool;
 use inkstone_infra::search::SearchIndex;
+use inkstone_runtime::config::AdminConfig;
 
 #[derive(Clone)]
 pub struct AdminState {
-    pub config: Arc<AppConfig>,
+    pub config: Arc<AdminConfig>,
     pub search: Arc<SearchIndex>,
     pub http_client: Client,
     pub db: Option<DbPool>,

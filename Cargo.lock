@@ -1405,9 +1405,9 @@ dependencies = [
  "clap",
  "hex",
  "hmac",
- "inkstone-app",
  "inkstone-core",
  "inkstone-infra",
+ "inkstone-runtime",
  "rand 0.8.5",
  "reqwest",
  "scraper",
@@ -1435,6 +1435,7 @@ dependencies = [
  "hmac",
  "inkstone-core",
  "inkstone-infra",
+ "inkstone-runtime",
  "rand 0.8.5",
  "reqwest",
  "scraper",
@@ -1472,6 +1473,14 @@ dependencies = [
  "tantivy",
  "thiserror 1.0.69",
  "uuid",
+]
+
+[[package]]
+name = "inkstone-runtime"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

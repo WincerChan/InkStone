@@ -6,5 +6,6 @@ members = [
     "crates/core",
     "crates/infra",
     "crates/public",
+    "crates/runtime",
 ]
 resolver = "2"

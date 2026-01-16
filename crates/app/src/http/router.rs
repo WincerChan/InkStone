@@ -83,11 +83,11 @@ fn should_enable_cors(allow_any: bool, origins: &[HeaderValue]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{build, is_wildcard_origin, should_enable_cors};
-    use crate::config::AppConfig;
     use crate::state::AppState;
     use axum::http::{HeaderValue, StatusCode};
     use axum::Router;
     use inkstone_infra::search::SearchIndex;
+    use inkstone_runtime::config::PublicConfig;
     use std::sync::Arc;
     use tokio::net::TcpListener;
     use tokio::time::{sleep, Duration};
@@ -99,36 +99,17 @@ mod tests {
             .as_nanos();
         let index_dir = std::env::temp_dir().join(format!("inkstone-router-{suffix}"));
         let _ = std::fs::create_dir_all(&index_dir);
-        let config = AppConfig {
+        let config = PublicConfig {
             http_addr: "127.0.0.1:8080".parse().unwrap(),
             index_dir: index_dir.clone(),
-            feed_url: "https://example.com/index.json".to_string(),
-            poll_interval: std::time::Duration::from_secs(300),
-            douban_poll_interval: std::time::Duration::from_secs(300),
-            comments_sync_interval: std::time::Duration::from_secs(300),
-            request_timeout: std::time::Duration::from_secs(15),
             max_search_limit: 50,
             database_url: None,
-            douban_max_pages: 1,
-            douban_uid: "1".to_string(),
-            douban_cookie: "cookie".to_string(),
-            douban_user_agent: "ua".to_string(),
             cookie_secret: Some("cookie".to_string()),
             stats_secret: Some("stats".to_string()),
             search_hash_secret: None,
             public_token_secret: Some("token".to_string()),
-            github_webhook_secret: None,
-            github_discussion_webhook_secret: None,
-            github_app_id: None,
-            github_app_installation_id: None,
-            github_app_private_key: None,
-            github_repo_owner: None,
-            github_repo_name: None,
-            github_discussion_category_id: None,
             cors_allow_origins: Vec::new(),
             pulse_allowed_slds: Vec::new(),
-            admin_password_hash: None,
-            admin_token_secret: None,
         };
         AppState {
             config: Arc::new(config),

@@ -26,3 +26,4 @@ uuid = { version = "1", features = ["serde"] }
 
 inkstone-core = { path = "../core" }
 inkstone-infra = { path = "../infra" }
+inkstone-runtime = { path = "../runtime" }

@@ -24,6 +24,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tower-http = { version = "0.6", features = ["cors"] }
 uuid = { version = "1", features = ["serde"] }
 
-inkstone-app = { path = "../app" }
 inkstone-core = { path = "../core" }
 inkstone-infra = { path = "../infra" }
+inkstone-runtime = { path = "../runtime" }

@@ -14,8 +14,7 @@ pub use cli::{Cli, Mode};
 use crate::http::HttpError;
 use crate::jobs::JobError;
 use crate::wiring::WiringError;
-use inkstone_app::config;
-use inkstone_app::config::ConfigError;
+use inkstone_runtime::config::{AdminConfig, ConfigError, load_dotenv};
 use inkstone_infra::db::run_migrations;
 
 #[derive(Debug, Error)]
@@ -47,8 +46,8 @@ pub async fn run_with_cli(cli: Cli) -> Result<(), AppError> {
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     tracing_subscriber::fmt().with_env_filter(env_filter).init();
 
-    config::load_dotenv()?;
-    let config = config::AppConfig::from_env()?;
+    load_dotenv()?;
+    let config = AdminConfig::from_env()?;
     if cli.rebuild_schema && !cli.mode.run_worker() {
         return Err(AppError::InvalidCli(
             "rebuild-schema requires worker mode".to_string(),

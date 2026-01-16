@@ -3,7 +3,7 @@ use axum::Json;
 use serde::Serialize;
 
 use crate::state::{AdminHealthState, AdminState};
-use inkstone_app::http::routes::health::{
+use inkstone_runtime::health::{
     DatabaseStatus, HealthModules, KudosStatus, ModuleStatus, PulseStatus, WebhookStatus,
 };
 

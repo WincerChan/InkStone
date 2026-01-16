@@ -6,7 +6,7 @@ use tracing::{info, warn};
 use crate::jobs::JobError;
 use crate::jobs::tasks::feed_index::{SearchIndexEntry, parse_search_index_entries};
 use crate::state::AdminState;
-use inkstone_app::config::AppConfig;
+use inkstone_runtime::config::AdminConfig;
 use inkstone_core::types::slug::Slug;
 use inkstone_infra::db::{
     CommentRecord, DiscussionRecord, find_discussion_by_discussion_id, find_discussion_by_post_id,
@@ -122,7 +122,7 @@ pub async fn run(state: &AdminState, rebuild: bool) -> Result<CommentsSyncStats,
     Ok(stats)
 }
 
-pub fn is_enabled(config: &AppConfig) -> bool {
+pub fn is_enabled(config: &AdminConfig) -> bool {
     CommentsConfig::from_app(config).is_some()
 }
 
@@ -585,7 +585,7 @@ fn decode_html_entities(input: &str) -> String {
 }
 
 impl CommentsConfig {
-    fn from_app(config: &AppConfig) -> Option<Self> {
+    fn from_app(config: &AdminConfig) -> Option<Self> {
         Some(Self {
             app_id: config.github_app_id?,
             installation_id: config.github_app_installation_id?,

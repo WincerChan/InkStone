@@ -34,7 +34,7 @@ jobs:
             exit 0
           fi
           changed="$(git diff --name-only "${before}" "${{ github.sha }}")"
-          if echo "${changed}" | grep -Eq '^(crates/admin/|crates/admin_core/|crates/core/|crates/infra/|deploy/docker/Dockerfile|Cargo\.toml|Cargo\.lock)'; then
+          if echo "${changed}" | grep -Eq '^(crates/admin/|crates/admin_core/|crates/core/|crates/infra/|crates/runtime/|deploy/docker/Dockerfile|Cargo\.toml|Cargo\.lock)'; then
             echo "build=true" >> "$GITHUB_OUTPUT"
           else
             echo "build=false" >> "$GITHUB_OUTPUT"
