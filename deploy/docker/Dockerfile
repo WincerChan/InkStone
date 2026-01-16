@@ -12,6 +12,8 @@ RUN cargo build -p ${INKSTONE_PACKAGE} --release --locked
 
 FROM debian:bookworm-slim
 
+ARG INKSTONE_PACKAGE=inkstone-app
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
