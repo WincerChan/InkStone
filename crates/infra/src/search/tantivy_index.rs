@@ -1,10 +1,17 @@
 use std::collections::{BTreeMap, HashSet};
+use std::fmt;
+use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use inkstone_core::domain::search::{SearchDocument, SearchHit, SearchQuery, SearchResult};
 use std::ops::Bound;
 use tantivy::collector::{Count, TopDocs};
+use tantivy::directory::{
+    Directory, DirectoryLock, FileHandle, Lock, MmapDirectory, WatchCallback, WatchHandle, WritePtr,
+};
+use tantivy::directory::error::{DeleteError, LockError, OpenReadError, OpenWriteError};
 use tantivy::query::{AllQuery, BooleanQuery, EmptyQuery, Occur, Query, RangeQuery, TermQuery};
 use tantivy::schema::{
     Field, IndexRecordOption, Schema, SchemaBuilder, TextFieldIndexing, TextOptions, Value, FAST,
@@ -77,13 +84,77 @@ pub struct SearchIndexStats {
     pub num_segments: usize,
 }
 
+#[derive(Clone)]
+struct ReadOnlyDirectory {
+    inner: Box<dyn Directory>,
+}
+
+impl ReadOnlyDirectory {
+    fn new(inner: Box<dyn Directory>) -> Self {
+        Self { inner }
+    }
+}
+
+impl fmt::Debug for ReadOnlyDirectory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ReadOnlyDirectory")
+    }
+}
+
+impl Directory for ReadOnlyDirectory {
+    fn get_file_handle(&self, path: &Path) -> Result<Arc<dyn FileHandle>, OpenReadError> {
+        self.inner.get_file_handle(path)
+    }
+
+    fn delete(&self, path: &Path) -> Result<(), DeleteError> {
+        Err(DeleteError::IoError {
+            io_error: Arc::new(readonly_error()),
+            filepath: path.to_path_buf(),
+        })
+    }
+
+    fn exists(&self, path: &Path) -> Result<bool, OpenReadError> {
+        self.inner.exists(path)
+    }
+
+    fn open_write(&self, path: &Path) -> Result<WritePtr, OpenWriteError> {
+        Err(OpenWriteError::wrap_io_error(readonly_error(), path.to_path_buf()))
+    }
+
+    fn atomic_read(&self, path: &Path) -> Result<Vec<u8>, OpenReadError> {
+        self.inner.atomic_read(path)
+    }
+
+    fn atomic_write(&self, _path: &Path, _data: &[u8]) -> io::Result<()> {
+        Err(readonly_error())
+    }
+
+    fn sync_directory(&self) -> io::Result<()> {
+        Ok(())
+    }
+
+    fn acquire_lock(&self, _lock: &Lock) -> Result<DirectoryLock, LockError> {
+        Ok(DirectoryLock::from(Box::new(())))
+    }
+
+    fn watch(&self, watch_callback: WatchCallback) -> tantivy::Result<WatchHandle> {
+        self.inner.watch(watch_callback)
+    }
+}
+
+fn readonly_error() -> io::Error {
+    io::Error::new(io::ErrorKind::PermissionDenied, "read-only directory")
+}
+
 impl SearchIndex {
     pub fn open_existing(path: impl AsRef<Path>) -> Result<Self, SearchIndexError> {
         let dir = path.as_ref();
         if !dir.exists() || !dir.join("meta.json").exists() {
             return Err(SearchIndexError::MissingIndex(dir.to_path_buf()));
         }
-        let index = Index::open_in_dir(dir)?;
+        let mmap_directory =
+            MmapDirectory::open(dir).map_err(tantivy::TantivyError::from)?;
+        let index = Index::open(ReadOnlyDirectory::new(Box::new(mmap_directory)))?;
         Self::open_from_index(index)
     }
 
@@ -1139,6 +1210,8 @@ mod tests {
     use super::*;
     use tantivy::collector::TopDocs;
     use tantivy::doc;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
 
     fn add_ngram_fields(
         doc: &mut TantivyDocument,
@@ -1188,6 +1261,40 @@ mod tests {
         register_tokenizers(&index)?;
         let fields = SearchFields::from_schema(&index.schema())?;
         Ok((index, fields))
+    }
+
+    #[cfg(unix)]
+    fn set_permissions_recursive(path: &Path, dir_mode: u32, file_mode: u32) -> io::Result<()> {
+        let metadata = std::fs::metadata(path)?;
+        let mode = if metadata.is_dir() { dir_mode } else { file_mode };
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))?;
+        if metadata.is_dir() {
+            for entry in std::fs::read_dir(path)? {
+                let entry = entry?;
+                set_permissions_recursive(&entry.path(), dir_mode, file_mode)?;
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn open_existing_allows_readonly_directory() -> Result<(), SearchIndexError> {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "inkstone-search-readonly-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        {
+            let _ = SearchIndex::open_or_create(&temp_dir)?;
+        }
+        set_permissions_recursive(&temp_dir, 0o555, 0o444)?;
+        let _ = SearchIndex::open_existing(&temp_dir)?;
+        set_permissions_recursive(&temp_dir, 0o755, 0o644)?;
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        Ok(())
     }
 
     #[test]
