@@ -4,13 +4,13 @@ use serde::Serialize;
 
 use crate::state::{AdminHealthState, AdminState};
 use inkstone_runtime::health::{
-    DatabaseStatus, HealthModules, KudosStatus, ModuleStatus, PulseStatus, WebhookStatus,
+    AdminHealthModules, DatabaseStatus, KudosStatus, ModuleStatus, PulseStatus, WebhookStatus,
 };
 
 #[derive(Debug, Serialize)]
 pub struct AdminHealthResponse {
     pub status: &'static str,
-    pub modules: HealthModules,
+    pub modules: AdminHealthModules,
     pub jobs: AdminJobsStatus,
     pub webhooks: AdminWebhooksStatus,
 }
@@ -53,7 +53,7 @@ pub async fn get_admin_health(State(state): State<AdminState>) -> Json<AdminHeal
     })
 }
 
-async fn build_modules(state: &AdminState) -> HealthModules {
+async fn build_modules(state: &AdminState) -> AdminHealthModules {
     let db_configured = state.db.is_some();
     let cookie_ready = state
         .config
@@ -79,7 +79,7 @@ async fn build_modules(state: &AdminState) -> HealthModules {
         .as_ref()
         .is_some_and(|value| !value.is_empty());
 
-    HealthModules {
+    AdminHealthModules {
         search: ModuleStatus { enabled: true },
         database: DatabaseStatus {
             configured: db_configured,
