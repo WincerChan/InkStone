@@ -20,6 +20,7 @@ pub fn build(state: AppState) -> Router<AppState> {
         )
         .route("/v2/douban/marks", get(douban::marks_this_year))
         .route("/v2/comments", get(comments::get_comments))
+        .route("/v2/comments/mapping", get(comments::get_comments_mapping))
         .route(
             "/v2/kudos",
             get(kudos::get_kudos)

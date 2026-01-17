@@ -184,6 +184,36 @@ Error body:
 }
 ```
 
+## Comments Mapping
+
+`GET /v2/comments/mapping`
+
+Query parameters:
+
+- `inkstone_token` (required): signed token with path `/v2/comments/mapping`
+
+Response:
+
+```json
+{
+  "generated_at": "2026-01-16T00:00:00Z",
+  "total": 1,
+  "items": [
+    {
+      "post_id": "/posts/hello/",
+      "discussion_url": "https://github.com/owner/repo/discussions/1",
+      "updated_at": "2026-01-15T00:00:00Z"
+    }
+  ]
+}
+```
+
+Errors:
+
+- `400 Bad Request`: token missing
+- `401 Unauthorized`: token invalid or wrong path
+- `503 Service Unavailable`: token secret not configured or DB not configured
+
 ## Kudos
 
 `GET /v2/kudos`
