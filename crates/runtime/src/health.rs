@@ -1,7 +1,16 @@
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
-pub struct HealthModules {
+pub struct PublicHealthModules {
+    pub search: ModuleStatus,
+    pub database: DatabaseStatus,
+    pub comments: ModuleStatus,
+    pub kudos: KudosStatus,
+    pub pulse: PulseStatus,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AdminHealthModules {
     pub search: ModuleStatus,
     pub database: DatabaseStatus,
     pub comments: ModuleStatus,

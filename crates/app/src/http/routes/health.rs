@@ -2,14 +2,14 @@ use axum::extract::State;
 use axum::Json;
 use serde::Serialize;
 use inkstone_runtime::health::{
-    DatabaseStatus, HealthModules, KudosStatus, ModuleStatus, PulseStatus, WebhookStatus,
+    DatabaseStatus, KudosStatus, ModuleStatus, PublicHealthModules, PulseStatus,
 };
 use crate::state::AppState;
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {
     pub status: &'static str,
-    pub modules: HealthModules,
+    pub modules: PublicHealthModules,
 }
 
 pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
@@ -35,7 +35,7 @@ pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
 
     Json(HealthResponse {
         status: "ok",
-        modules: HealthModules {
+        modules: PublicHealthModules {
             search: ModuleStatus { enabled: true },
             database: DatabaseStatus {
                 configured: db_configured,
@@ -53,12 +53,6 @@ pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
                 cookie_ready,
                 token_ready,
             },
-            douban: ModuleStatus {
-                enabled: db_configured,
-            },
-            webhook: WebhookStatus {
-                configured: false,
-            },
         },
     })
 }
@@ -68,6 +62,7 @@ mod tests {
     use super::health;
     use axum::extract::State;
     use std::sync::Arc;
+    use serde_json::Value;
     use crate::state::AppState;
     use inkstone_infra::db::connect_lazy;
     use inkstone_infra::search::SearchIndex;
@@ -117,5 +112,18 @@ mod tests {
         let state = build_state(false);
         let response = health(State(state)).await;
         assert!(!response.modules.comments.enabled);
+    }
+
+    #[tokio::test]
+    async fn health_excludes_admin_only_modules() {
+        let state = build_state(true);
+        let response = health(State(state)).await;
+        let value = serde_json::to_value(&response.0).unwrap();
+        let modules = value
+            .get("modules")
+            .and_then(Value::as_object)
+            .unwrap();
+        assert!(!modules.contains_key("webhook"));
+        assert!(!modules.contains_key("douban"));
     }
 }
