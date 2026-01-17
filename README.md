@@ -4,9 +4,14 @@ Inkstone is a Rust workspace that combines an HTTP search API with a scheduled w
 
 ## Workspace layout
 
-- `crates/app`: binary for HTTP API + worker scheduler
+- `crates/public`: public API binary
+- `crates/admin`: admin API + worker binary
+- `crates/allinone`: dev all-in-one binary (public + admin + worker on one port)
+- `crates/app`: public API library (router/state/wiring)
+- `crates/admin_core`: admin API + worker library
 - `crates/core`: domain types and errors
 - `crates/infra`: infrastructure adapters (Tantivy, etc.)
+- `crates/runtime`: shared config + health types
 
 ## Prerequisites
 
@@ -23,31 +28,31 @@ cargo build
 Run public API only:
 
 ```bash
-cargo run -p inkstone-app -- --mode public
+cargo run -p public
 ```
 
 Run admin API + worker:
 
 ```bash
-cargo run -p inkstone-app -- --mode admin
+cargo run -p admin
 ```
 
 Run worker only:
 
 ```bash
-cargo run -p inkstone-app -- --mode worker
+cargo run -p admin -- --mode worker
 ```
 
-Run API + worker (default):
+Run public + admin + worker on the same port (dev only):
 
 ```bash
-cargo run -p inkstone-app
+cargo run -p allinone
 ```
 
 Rebuild the search index and run a full Douban crawl on startup:
 
 ```bash
-cargo run -p inkstone-app -- --rebuild
+cargo run -p admin -- --rebuild
 ```
 
 ## Configuration
@@ -113,7 +118,7 @@ INKSTONE_GITHUB_REPO_OWNER=yourname \
 INKSTONE_GITHUB_REPO_NAME=yourrepo \
 INKSTONE_GITHUB_DISCUSSION_CATEGORY_ID=DISCUSSION_CATEGORY_ID \
 INKSTONE_CORS_ALLOW_ORIGINS=http://localhost:5173,http://127.0.0.1:5173 \
-cargo run -p inkstone-app
+cargo run -p allinone
 ```
 
 Example `.env`:

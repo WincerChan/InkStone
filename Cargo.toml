@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/allinone",
     "crates/app",
     "crates/admin",
     "crates/admin_core",

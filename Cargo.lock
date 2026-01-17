@@ -39,6 +39,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "allinone"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "inkstone-admin-core",
+ "inkstone-app",
+ "inkstone-infra",
+ "inkstone-runtime",
+ "reqwest",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "alloc-no-stdlib"
 version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
