@@ -38,7 +38,6 @@ pub struct AdminConfig {
     pub douban_poster_r2_secret_access_key: Option<String>,
     pub douban_poster_r2_public_base_url: Option<String>,
     pub douban_poster_r2_region: String,
-    pub douban_poster_r2_prefix: String,
     pub cookie_secret: Option<String>,
     pub stats_secret: Option<String>,
     pub public_token_secret: Option<String>,
@@ -119,7 +118,6 @@ impl AdminConfig {
         let douban_poster_r2_public_base_url =
             read_optional_string("INKSTONE_DOUBAN_POSTER_R2_PUBLIC_BASE_URL")?;
         let douban_poster_r2_region = read_string("INKSTONE_DOUBAN_POSTER_R2_REGION", "auto")?;
-        let douban_poster_r2_prefix = read_string("INKSTONE_DOUBAN_POSTER_R2_PREFIX", "douban")?;
         let admin_password_hash = read_optional_string("INKSTONE_ADMIN_PASSWORD_HASH")?;
         let admin_token_secret = read_optional_string("INKSTONE_ADMIN_TOKEN_SECRET")?;
         let github_webhook_secret = read_optional_string("INKSTONE_GITHUB_WEBHOOK_SECRET")?;
@@ -152,7 +150,6 @@ impl AdminConfig {
             douban_poster_r2_secret_access_key,
             douban_poster_r2_public_base_url,
             douban_poster_r2_region,
-            douban_poster_r2_prefix,
             cookie_secret: shared.cookie_secret,
             stats_secret: shared.stats_secret,
             public_token_secret: shared.public_token_secret,

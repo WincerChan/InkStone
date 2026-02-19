@@ -161,7 +161,6 @@ mod tests {
             douban_poster_r2_secret_access_key: None,
             douban_poster_r2_public_base_url: None,
             douban_poster_r2_region: "auto".to_string(),
-            douban_poster_r2_prefix: "douban".to_string(),
             cookie_secret: Some("cookie".to_string()),
             stats_secret: Some("stats".to_string()),
             public_token_secret: Some("token".to_string()),

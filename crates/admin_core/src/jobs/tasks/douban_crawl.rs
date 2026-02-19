@@ -1,14 +1,13 @@
 use std::collections::HashSet;
-use std::io::Cursor;
 
 use aws_credential_types::Credentials;
 use aws_credential_types::provider::SharedCredentialsProvider;
 use aws_sdk_s3::Client as S3Client;
+use aws_sdk_s3::config::BehaviorVersion;
 use aws_sdk_s3::config::Builder as S3ConfigBuilder;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_types::region::Region;
 use chrono::{NaiveDate, Utc};
-use image::ImageFormat;
 use scraper::{ElementRef, Html, Selector};
 use serde::Serialize;
 use tracing::{debug, warn};
@@ -29,7 +28,12 @@ struct PosterR2Uploader {
     client: S3Client,
     bucket: String,
     public_base_url: String,
-    prefix: String,
+}
+
+struct DownloadedPoster {
+    bytes: Vec<u8>,
+    content_type: String,
+    extension: String,
 }
 
 impl PosterR2Uploader {
@@ -79,23 +83,22 @@ impl PosterR2Uploader {
             "inkstone-douban-crawl",
         );
         let config = S3ConfigBuilder::new()
+            .behavior_version(BehaviorVersion::latest())
             .region(Region::new(state.config.douban_poster_r2_region.clone()))
             .credentials_provider(SharedCredentialsProvider::new(credentials))
             .endpoint_url(endpoint)
             .force_path_style(true)
             .build();
-        let prefix = sanitize_key_prefix(&state.config.douban_poster_r2_prefix);
 
         Some(Self {
             client: S3Client::from_conf(config),
             bucket,
             public_base_url: public_base_url.trim_end_matches('/').to_string(),
-            prefix,
         })
     }
 
-    fn object_key(&self, category: DoubanCategory, item_id: &str) -> String {
-        build_poster_object_key(&self.prefix, category, item_id)
+    fn object_key(&self, category: DoubanCategory, item_id: &str, extension: &str) -> String {
+        build_poster_object_key(category, item_id, extension)
     }
 
     fn public_url(&self, key: &str) -> String {
@@ -287,8 +290,7 @@ async fn upload_page_posters(
         if uploader.is_managed_url(source_url) {
             continue;
         }
-        let key = uploader.object_key(category, &item.id);
-        match fetch_convert_and_upload_poster(state, uploader, source_url, &key).await {
+        match fetch_and_upload_poster(state, uploader, category, &item.id, source_url).await {
             Ok(public_url) => {
                 item.poster = Some(public_url);
             }
@@ -348,28 +350,29 @@ fn collect_refresh_upload_item_ids(
         .collect()
 }
 
-async fn fetch_convert_and_upload_poster(
+async fn fetch_and_upload_poster(
     state: &AdminState,
     uploader: &PosterR2Uploader,
+    category: DoubanCategory,
+    item_id: &str,
     source_url: &str,
-    key: &str,
 ) -> Result<String, String> {
-    let source_bytes = download_poster_bytes(state, source_url).await?;
-    let webp = transcode_to_webp(&source_bytes)?;
+    let poster = download_poster(state, source_url).await?;
+    let key = uploader.object_key(category, item_id, &poster.extension);
     uploader
         .client
         .put_object()
         .bucket(&uploader.bucket)
-        .key(key)
-        .content_type("image/webp")
-        .body(ByteStream::from(webp))
+        .key(&key)
+        .content_type(poster.content_type)
+        .body(ByteStream::from(poster.bytes))
         .send()
         .await
         .map_err(|err| format!("upload object failed: {err}"))?;
-    Ok(uploader.public_url(key))
+    Ok(uploader.public_url(&key))
 }
 
-async fn download_poster_bytes(state: &AdminState, url: &str) -> Result<Vec<u8>, String> {
+async fn download_poster(state: &AdminState, url: &str) -> Result<DownloadedPoster, String> {
     let response = state
         .http_client
         .get(url)
@@ -380,6 +383,11 @@ async fn download_poster_bytes(state: &AdminState, url: &str) -> Result<Vec<u8>,
         .map_err(|err| format!("download request failed: {err}"))?
         .error_for_status()
         .map_err(|err| format!("download request status error: {err}"))?;
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok());
+    let (content_type, extension) = resolve_poster_media_type(content_type, url);
     let bytes = response
         .bytes()
         .await
@@ -391,17 +399,64 @@ async fn download_poster_bytes(state: &AdminState, url: &str) -> Result<Vec<u8>,
             MAX_POSTER_BYTES
         ));
     }
-    Ok(bytes.to_vec())
+    Ok(DownloadedPoster {
+        bytes: bytes.to_vec(),
+        content_type,
+        extension,
+    })
 }
 
-fn transcode_to_webp(source: &[u8]) -> Result<Vec<u8>, String> {
-    let image = image::load_from_memory(source)
-        .map_err(|err| format!("decode poster image failed: {err}"))?;
-    let mut output = Cursor::new(Vec::new());
-    image
-        .write_to(&mut output, ImageFormat::WebP)
-        .map_err(|err| format!("encode webp failed: {err}"))?;
-    Ok(output.into_inner())
+fn resolve_poster_media_type(content_type: Option<&str>, url: &str) -> (String, String) {
+    if let Some(media) = parse_supported_image_content_type(content_type) {
+        return media;
+    }
+    if let Some(media) = parse_supported_image_ext_from_url(url) {
+        return media;
+    }
+    ("image/jpeg".to_string(), "jpg".to_string())
+}
+
+fn parse_supported_image_content_type(content_type: Option<&str>) -> Option<(String, String)> {
+    let raw = content_type?
+        .split(';')
+        .next()
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let ext = match raw.as_str() {
+        "image/jpeg" | "image/jpg" | "image/pjpeg" => "jpg",
+        "image/png" => "png",
+        "image/webp" => "webp",
+        "image/gif" => "gif",
+        _ => return None,
+    };
+    let canonical = if ext == "jpg" {
+        "image/jpeg".to_string()
+    } else {
+        raw
+    };
+    Some((canonical, ext.to_string()))
+}
+
+fn parse_supported_image_ext_from_url(url: &str) -> Option<(String, String)> {
+    let without_query = url.split_once('?').map(|(path, _)| path).unwrap_or(url);
+    let url_without_query = without_query
+        .split_once('#')
+        .map(|(path, _)| path)
+        .unwrap_or(without_query);
+    let ext = url_without_query
+        .rsplit_once('.')
+        .map(|(_, ext)| ext)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let (content_type, ext) = match ext.as_str() {
+        "jpeg" | "jpg" => ("image/jpeg", "jpg"),
+        "png" => ("image/png", "png"),
+        "webp" => ("image/webp", "webp"),
+        "gif" => ("image/gif", "gif"),
+        _ => return None,
+    };
+    Some((content_type.to_string(), ext.to_string()))
 }
 
 fn parse_page(html: &str, category: DoubanCategory) -> Vec<DoubanItem> {
@@ -789,22 +844,11 @@ fn join_url(base_url: &str, href: &str) -> String {
     }
 }
 
-fn build_poster_object_key(prefix: &str, category: DoubanCategory, item_id: &str) -> String {
+fn build_poster_object_key(category: DoubanCategory, item_id: &str, extension: &str) -> String {
     let category_segment = sanitize_key_segment(category.label(), "item");
     let item_segment = sanitize_key_segment(item_id, "unknown");
-    if prefix.is_empty() {
-        format!("{category_segment}/{item_segment}.webp")
-    } else {
-        format!("{prefix}/{category_segment}/{item_segment}.webp")
-    }
-}
-
-fn sanitize_key_prefix(raw: &str) -> String {
-    raw.split('/')
-        .map(|part| sanitize_key_segment(part, ""))
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join("/")
+    let extension = sanitize_key_segment(extension, "jpg").to_ascii_lowercase();
+    format!("{category_segment}/{item_segment}.{extension}")
 }
 
 fn sanitize_key_segment(raw: &str, fallback: &str) -> String {
@@ -850,7 +894,8 @@ mod tests {
     use super::{
         DoubanCategory, DoubanItem, build_poster_object_key, collect_refresh_upload_item_ids,
         map_items_for_db, parse_book_items, parse_game_items, parse_movie_items,
-        sanitize_key_prefix, sanitize_key_segment, should_stop_on_existing,
+        parse_supported_image_content_type, parse_supported_image_ext_from_url,
+        sanitize_key_segment, should_stop_on_existing,
     };
     use std::collections::HashSet;
 
@@ -958,15 +1003,21 @@ mod tests {
     }
 
     #[test]
-    fn build_poster_object_key_uses_webp_suffix() {
-        let key = build_poster_object_key("douban/posters", DoubanCategory::Movie, "123456");
-        assert_eq!(key, "douban/posters/movie/123456.webp");
+    fn build_poster_object_key_uses_extension() {
+        let key = build_poster_object_key(DoubanCategory::Movie, "123456", "jpg");
+        assert_eq!(key, "movie/123456.jpg");
     }
 
     #[test]
-    fn sanitize_key_prefix_drops_empty_segments() {
-        let prefix = sanitize_key_prefix("/douban//poster assets/");
-        assert_eq!(prefix, "douban/poster_assets");
+    fn parse_supported_image_content_type_maps_jpeg() {
+        let media = parse_supported_image_content_type(Some("image/jpeg; charset=binary"));
+        assert_eq!(media, Some(("image/jpeg".to_string(), "jpg".to_string())));
+    }
+
+    #[test]
+    fn parse_supported_image_ext_from_url_maps_webp() {
+        let media = parse_supported_image_ext_from_url("https://img.example.com/a/b/c.webp?x=1");
+        assert_eq!(media, Some(("image/webp".to_string(), "webp".to_string())));
     }
 
     #[test]
