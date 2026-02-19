@@ -24,17 +24,53 @@ jobs:
       - name: Detect changes
         id: changes
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+          head="${{ github.sha }}"
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          before="${{ github.event.before }}"
-          if [[ "${before}" == "0000000000000000000000000000000000000000" ]]; then
+
+          last_success="$(
+            curl -fsSL \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/build-admin.yml/runs?branch=${GITHUB_REF_NAME}&event=push&status=success&per_page=1" \
+            | jq -r '.workflow_runs[0].head_sha // ""'
+          )"
+
+          base=""
+          base_source=""
+          if [[ -n "${last_success}" && "${last_success}" != "${head}" ]] && git cat-file -e "${last_success}^{commit}" 2>/dev/null; then
+            base="${last_success}"
+            base_source="last_successful_workflow_run"
+          else
+            before="${{ github.event.before }}"
+            if [[ -n "${before}" && "${before}" != "0000000000000000000000000000000000000000" ]] && git cat-file -e "${before}^{commit}" 2>/dev/null; then
+              base="${before}"
+              base_source="event_before"
+            fi
+          fi
+
+          if [[ -z "${base}" ]]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          changed="$(git diff --name-only "${before}" "${{ github.sha }}")"
+
+          changed="$(git diff --name-only "${base}" "${head}")"
+          echo "base_source=${base_source}"
+          echo "base=${base}"
+          echo "head=${head}"
+          echo "changed files:"
+          echo "${changed}"
           if echo "${changed}" | grep -Eq '^(crates/admin/|crates/admin_core/|crates/core/|crates/infra/|crates/runtime/|deploy/docker/Dockerfile|Cargo\.toml|Cargo\.lock)'; then
             echo "build=true" >> "$GITHUB_OUTPUT"
           else
