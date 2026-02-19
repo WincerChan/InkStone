@@ -1,4 +1,4 @@
-FROM rust:1.88-bookworm AS builder
+FROM rust:1.92-bookworm AS builder
 
 ARG INKSTONE_PACKAGE=inkstone-app
 
