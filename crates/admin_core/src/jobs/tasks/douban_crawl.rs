@@ -22,6 +22,7 @@ use inkstone_infra::db::{
 const ITEM_LOG_LIMIT: usize = 20;
 const DOUBAN_REFERER: &str = "https://www.douban.com";
 const MAX_POSTER_BYTES: usize = 10 * 1024 * 1024;
+// CI note: this task is in admin_core and should only trigger admin image builds.
 
 #[derive(Clone)]
 struct PosterR2Uploader {
