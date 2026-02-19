@@ -32,6 +32,13 @@ pub struct AdminConfig {
     pub douban_uid: String,
     pub douban_cookie: String,
     pub douban_user_agent: String,
+    pub douban_poster_r2_endpoint: Option<String>,
+    pub douban_poster_r2_bucket: Option<String>,
+    pub douban_poster_r2_access_key_id: Option<String>,
+    pub douban_poster_r2_secret_access_key: Option<String>,
+    pub douban_poster_r2_public_base_url: Option<String>,
+    pub douban_poster_r2_region: String,
+    pub douban_poster_r2_prefix: String,
     pub cookie_secret: Option<String>,
     pub stats_secret: Option<String>,
     pub public_token_secret: Option<String>,
@@ -103,14 +110,23 @@ impl AdminConfig {
             "INKSTONE_DOUBAN_USER_AGENT",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
         )?;
+        let douban_poster_r2_endpoint = read_optional_string("INKSTONE_DOUBAN_POSTER_R2_ENDPOINT")?;
+        let douban_poster_r2_bucket = read_optional_string("INKSTONE_DOUBAN_POSTER_R2_BUCKET")?;
+        let douban_poster_r2_access_key_id =
+            read_optional_string("INKSTONE_DOUBAN_POSTER_R2_ACCESS_KEY_ID")?;
+        let douban_poster_r2_secret_access_key =
+            read_optional_string("INKSTONE_DOUBAN_POSTER_R2_SECRET_ACCESS_KEY")?;
+        let douban_poster_r2_public_base_url =
+            read_optional_string("INKSTONE_DOUBAN_POSTER_R2_PUBLIC_BASE_URL")?;
+        let douban_poster_r2_region = read_string("INKSTONE_DOUBAN_POSTER_R2_REGION", "auto")?;
+        let douban_poster_r2_prefix = read_string("INKSTONE_DOUBAN_POSTER_R2_PREFIX", "douban")?;
         let admin_password_hash = read_optional_string("INKSTONE_ADMIN_PASSWORD_HASH")?;
         let admin_token_secret = read_optional_string("INKSTONE_ADMIN_TOKEN_SECRET")?;
         let github_webhook_secret = read_optional_string("INKSTONE_GITHUB_WEBHOOK_SECRET")?;
         let github_discussion_webhook_secret =
             read_optional_string("INKSTONE_GITHUB_DISCUSSION_WEBHOOK_SECRET")?;
         let github_app_id = read_optional_u64("INKSTONE_GITHUB_APP_ID")?;
-        let github_app_installation_id =
-            read_optional_u64("INKSTONE_GITHUB_APP_INSTALLATION_ID")?;
+        let github_app_installation_id = read_optional_u64("INKSTONE_GITHUB_APP_INSTALLATION_ID")?;
         let github_app_private_key = read_optional_string("INKSTONE_GITHUB_APP_PRIVATE_KEY")?;
         let github_repo_owner = read_optional_string("INKSTONE_GITHUB_REPO_OWNER")?;
         let github_repo_name = read_optional_string("INKSTONE_GITHUB_REPO_NAME")?;
@@ -130,6 +146,13 @@ impl AdminConfig {
             douban_uid,
             douban_cookie,
             douban_user_agent,
+            douban_poster_r2_endpoint,
+            douban_poster_r2_bucket,
+            douban_poster_r2_access_key_id,
+            douban_poster_r2_secret_access_key,
+            douban_poster_r2_public_base_url,
+            douban_poster_r2_region,
+            douban_poster_r2_prefix,
             cookie_secret: shared.cookie_secret,
             stats_secret: shared.stats_secret,
             public_token_secret: shared.public_token_secret,
@@ -282,12 +305,14 @@ fn parse_dotenv_line(raw: &str) -> Option<(String, String)> {
     if key.is_empty() {
         return None;
     }
-    let unquoted = if let Some(value) = value.strip_prefix('"').and_then(|v| v.strip_suffix('"'))
-    {
-        Some(value.replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t"))
-    } else if let Some(value) =
-        value.strip_prefix('\'').and_then(|v| v.strip_suffix('\''))
-    {
+    let unquoted = if let Some(value) = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')) {
+        Some(
+            value
+                .replace("\\n", "\n")
+                .replace("\\r", "\r")
+                .replace("\\t", "\t"),
+        )
+    } else if let Some(value) = value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')) {
         Some(value.to_string())
     } else {
         None

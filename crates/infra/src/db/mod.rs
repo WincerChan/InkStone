@@ -20,8 +20,9 @@ pub use comments_repo::{
 };
 pub use douban_repo::{
     count_recent_douban_items, fetch_douban_marks_by_range, fetch_douban_overview,
-    fetch_recent_douban_items, insert_douban_items, upsert_douban_items, DoubanItemRecord,
-    DoubanMarkRecord, DoubanOverview, DoubanRecentItem, DoubanRepoError, DoubanTypeCount,
+    fetch_existing_douban_item_ids, fetch_recent_douban_items, insert_douban_items,
+    upsert_douban_items, DoubanItemRecord, DoubanMarkRecord, DoubanOverview, DoubanRecentItem,
+    DoubanRepoError, DoubanTypeCount,
 };
 pub use kudos_repo::{
     count_kudos, count_recent_kudos, fetch_kudos_overview, fetch_kudos_top_paths,

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use chrono::NaiveDate;
 use sqlx::{PgPool, QueryBuilder, Row};
 use thiserror::Error;
@@ -125,6 +127,33 @@ pub async fn insert_douban_items(
     let result = builder.build().execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(result.rows_affected())
+}
+
+pub async fn fetch_existing_douban_item_ids(
+    pool: &PgPool,
+    item_type: &str,
+    ids: &[String],
+) -> Result<HashSet<String>, DoubanRepoError> {
+    if ids.is_empty() {
+        return Ok(HashSet::new());
+    }
+
+    let mut builder = QueryBuilder::new(r#"SELECT id FROM douban_items WHERE "type" = "#);
+    builder.push_bind(item_type);
+    builder.push(" AND id IN (");
+    let mut separated = builder.separated(", ");
+    for id in ids {
+        separated.push_bind(id);
+    }
+    separated.push_unseparated(")");
+
+    let rows = builder.build().fetch_all(pool).await?;
+    let mut existing_ids = HashSet::with_capacity(rows.len());
+    for row in rows {
+        let id: String = row.try_get("id")?;
+        existing_ids.insert(id);
+    }
+    Ok(existing_ids)
 }
 
 pub async fn fetch_douban_marks_by_range(

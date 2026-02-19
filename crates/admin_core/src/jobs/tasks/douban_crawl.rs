@@ -1,6 +1,14 @@
 use std::collections::HashSet;
+use std::io::Cursor;
 
+use aws_credential_types::Credentials;
+use aws_credential_types::provider::SharedCredentialsProvider;
+use aws_sdk_s3::Client as S3Client;
+use aws_sdk_s3::config::Builder as S3ConfigBuilder;
+use aws_sdk_s3::primitives::ByteStream;
+use aws_types::region::Region;
 use chrono::{NaiveDate, Utc};
+use image::ImageFormat;
 use scraper::{ElementRef, Html, Selector};
 use serde::Serialize;
 use tracing::{debug, warn};
@@ -8,10 +16,96 @@ use tracing::{debug, warn};
 use crate::jobs::JobError;
 use crate::state::AdminState;
 use inkstone_infra::db::{
-    insert_douban_items, upsert_douban_items, DbPool, DoubanItemRecord,
+    DbPool, DoubanItemRecord, fetch_existing_douban_item_ids, insert_douban_items,
+    upsert_douban_items,
 };
 
 const ITEM_LOG_LIMIT: usize = 20;
+const DOUBAN_REFERER: &str = "https://www.douban.com";
+const MAX_POSTER_BYTES: usize = 10 * 1024 * 1024;
+
+#[derive(Clone)]
+struct PosterR2Uploader {
+    client: S3Client,
+    bucket: String,
+    public_base_url: String,
+    prefix: String,
+}
+
+impl PosterR2Uploader {
+    fn from_state(state: &AdminState) -> Option<Self> {
+        let endpoint = state.config.douban_poster_r2_endpoint.clone();
+        let bucket = state.config.douban_poster_r2_bucket.clone();
+        let access_key_id = state.config.douban_poster_r2_access_key_id.clone();
+        let secret_access_key = state.config.douban_poster_r2_secret_access_key.clone();
+        let public_base_url = state.config.douban_poster_r2_public_base_url.clone();
+
+        let any_configured = [
+            endpoint.as_deref(),
+            bucket.as_deref(),
+            access_key_id.as_deref(),
+            secret_access_key.as_deref(),
+            public_base_url.as_deref(),
+        ]
+        .iter()
+        .any(|value| value.is_some());
+        if !any_configured {
+            return None;
+        }
+
+        let (
+            Some(endpoint),
+            Some(bucket),
+            Some(access_key_id),
+            Some(secret_access_key),
+            Some(public_base_url),
+        ) = (
+            endpoint,
+            bucket,
+            access_key_id,
+            secret_access_key,
+            public_base_url,
+        )
+        else {
+            warn!("douban poster r2 config is partial; poster upload disabled");
+            return None;
+        };
+
+        let credentials = Credentials::new(
+            access_key_id,
+            secret_access_key,
+            None,
+            None,
+            "inkstone-douban-crawl",
+        );
+        let config = S3ConfigBuilder::new()
+            .region(Region::new(state.config.douban_poster_r2_region.clone()))
+            .credentials_provider(SharedCredentialsProvider::new(credentials))
+            .endpoint_url(endpoint)
+            .force_path_style(true)
+            .build();
+        let prefix = sanitize_key_prefix(&state.config.douban_poster_r2_prefix);
+
+        Some(Self {
+            client: S3Client::from_conf(config),
+            bucket,
+            public_base_url: public_base_url.trim_end_matches('/').to_string(),
+            prefix,
+        })
+    }
+
+    fn object_key(&self, category: DoubanCategory, item_id: &str) -> String {
+        build_poster_object_key(&self.prefix, category, item_id)
+    }
+
+    fn public_url(&self, key: &str) -> String {
+        format!("{}/{}", self.public_base_url, key)
+    }
+
+    fn is_managed_url(&self, url: &str) -> bool {
+        url.starts_with(&self.public_base_url)
+    }
+}
 
 #[derive(Debug, Serialize)]
 pub struct DoubanItem {
@@ -67,7 +161,11 @@ pub async fn run(state: &AdminState, rebuild: bool) -> Result<(), JobError> {
         health.douban_crawl_last_run = Some(Utc::now());
     }
     let uid = state.config.douban_uid.as_str();
-    for category in [DoubanCategory::Movie, DoubanCategory::Book, DoubanCategory::Game] {
+    for category in [
+        DoubanCategory::Movie,
+        DoubanCategory::Book,
+        DoubanCategory::Game,
+    ] {
         let items = fetch_all_pages(state, category, uid, rebuild).await?;
         log_items(category, &items);
     }
@@ -103,6 +201,7 @@ async fn fetch_all_pages(
     uid: &str,
     rebuild: bool,
 ) -> Result<Vec<DoubanItem>, JobError> {
+    let poster_uploader = PosterR2Uploader::from_state(state);
     let mut items = Vec::new();
     let mut next_url = category.start_url(uid);
     let mut seen = HashSet::new();
@@ -110,7 +209,10 @@ async fn fetch_all_pages(
     let max_pages = state.config.douban_max_pages;
     let pool = state.db.as_ref();
     if pool.is_none() {
-        warn!(category = category.label(), "db not configured; skip douban upsert");
+        warn!(
+            category = category.label(),
+            "db not configured; skip douban upsert"
+        );
     }
 
     loop {
@@ -119,7 +221,17 @@ async fn fetch_all_pages(
         }
         pages_fetched += 1;
         let html = fetch_page(state, &next_url).await?;
-        let page_items = parse_page(&html, category);
+        let mut page_items = parse_page(&html, category);
+        if let Some(uploader) = poster_uploader.as_ref() {
+            match (rebuild, pool) {
+                (true, _) | (_, None) => {
+                    upload_page_posters(state, uploader, category, &mut page_items, None).await;
+                }
+                (false, Some(pool)) => {
+                    upload_new_page_posters(state, uploader, pool, category, &mut page_items).await;
+                }
+            }
+        }
         let stop_on_existing = if let Some(pool) = pool {
             sync_page(pool, category, &page_items, rebuild).await?
         } else {
@@ -153,6 +265,143 @@ async fn fetch_page(state: &AdminState, url: &str) -> Result<String, JobError> {
     }
     let response = request.send().await?.error_for_status()?;
     Ok(response.text().await?)
+}
+
+async fn upload_page_posters(
+    state: &AdminState,
+    uploader: &PosterR2Uploader,
+    category: DoubanCategory,
+    items: &mut [DoubanItem],
+    include_item_ids: Option<&HashSet<String>>,
+) {
+    for item in items {
+        if include_item_ids
+            .as_ref()
+            .is_some_and(|ids| !ids.contains(&item.id))
+        {
+            continue;
+        }
+        let Some(source_url) = item.poster.as_deref() else {
+            continue;
+        };
+        if uploader.is_managed_url(source_url) {
+            continue;
+        }
+        let key = uploader.object_key(category, &item.id);
+        match fetch_convert_and_upload_poster(state, uploader, source_url, &key).await {
+            Ok(public_url) => {
+                item.poster = Some(public_url);
+            }
+            Err(err) => {
+                warn!(
+                    category = category.label(),
+                    item_id = %item.id,
+                    source_url,
+                    error = %err,
+                    "douban poster upload failed; keep source url"
+                );
+            }
+        }
+    }
+}
+
+async fn upload_new_page_posters(
+    state: &AdminState,
+    uploader: &PosterR2Uploader,
+    pool: &DbPool,
+    category: DoubanCategory,
+    items: &mut [DoubanItem],
+) {
+    let item_ids: Vec<String> = items.iter().map(|item| item.id.clone()).collect();
+    let existing_ids = match fetch_existing_douban_item_ids(pool, category.label(), &item_ids).await
+    {
+        Ok(ids) => ids,
+        Err(err) => {
+            warn!(
+                category = category.label(),
+                error = %err,
+                "load existing douban item ids failed; fallback to uploading all posters"
+            );
+            HashSet::new()
+        }
+    };
+    let upload_item_ids = collect_refresh_upload_item_ids(items, &existing_ids);
+    if upload_item_ids.is_empty() {
+        return;
+    }
+    upload_page_posters(state, uploader, category, items, Some(&upload_item_ids)).await;
+}
+
+fn collect_refresh_upload_item_ids(
+    items: &[DoubanItem],
+    existing_ids: &HashSet<String>,
+) -> HashSet<String> {
+    items
+        .iter()
+        .filter_map(|item| {
+            if existing_ids.contains(&item.id) {
+                None
+            } else {
+                Some(item.id.clone())
+            }
+        })
+        .collect()
+}
+
+async fn fetch_convert_and_upload_poster(
+    state: &AdminState,
+    uploader: &PosterR2Uploader,
+    source_url: &str,
+    key: &str,
+) -> Result<String, String> {
+    let source_bytes = download_poster_bytes(state, source_url).await?;
+    let webp = transcode_to_webp(&source_bytes)?;
+    uploader
+        .client
+        .put_object()
+        .bucket(&uploader.bucket)
+        .key(key)
+        .content_type("image/webp")
+        .body(ByteStream::from(webp))
+        .send()
+        .await
+        .map_err(|err| format!("upload object failed: {err}"))?;
+    Ok(uploader.public_url(key))
+}
+
+async fn download_poster_bytes(state: &AdminState, url: &str) -> Result<Vec<u8>, String> {
+    let response = state
+        .http_client
+        .get(url)
+        .header("User-Agent", state.config.douban_user_agent.as_str())
+        .header("Referer", DOUBAN_REFERER)
+        .send()
+        .await
+        .map_err(|err| format!("download request failed: {err}"))?
+        .error_for_status()
+        .map_err(|err| format!("download request status error: {err}"))?;
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|err| format!("read response bytes failed: {err}"))?;
+    if bytes.len() > MAX_POSTER_BYTES {
+        return Err(format!(
+            "poster too large: {} bytes (limit {})",
+            bytes.len(),
+            MAX_POSTER_BYTES
+        ));
+    }
+    Ok(bytes.to_vec())
+}
+
+fn transcode_to_webp(source: &[u8]) -> Result<Vec<u8>, String> {
+    let image = image::load_from_memory(source)
+        .map_err(|err| format!("decode poster image failed: {err}"))?;
+    let mut output = Cursor::new(Vec::new());
+    image
+        .write_to(&mut output, ImageFormat::WebP)
+        .map_err(|err| format!("encode webp failed: {err}"))?;
+    Ok(output.into_inner())
 }
 
 fn parse_page(html: &str, category: DoubanCategory) -> Vec<DoubanItem> {
@@ -427,7 +676,9 @@ fn parse_rating_class(class_name: &str) -> Option<u8> {
 }
 
 fn extract_date(text: &str) -> Option<String> {
-    text.split_whitespace().next().map(|value| value.to_string())
+    text.split_whitespace()
+        .next()
+        .map(|value| value.to_string())
 }
 
 fn parse_tags_text(text: &str) -> Vec<String> {
@@ -456,7 +707,10 @@ async fn sync_page(
 
     if rebuild {
         let affected = upsert_douban_items(pool, &records).await?;
-        debug!(category = category.label(), affected, "douban items upserted");
+        debug!(
+            category = category.label(),
+            affected, "douban items upserted"
+        );
         return Ok(false);
     }
 
@@ -464,8 +718,7 @@ async fn sync_page(
     let inserted = insert_douban_items(pool, &records).await?;
     debug!(
         category = category.label(),
-        inserted,
-        "douban items inserted"
+        inserted, "douban items inserted"
     );
     let stop = should_stop_on_existing(inserted, total);
     if stop {
@@ -536,6 +789,44 @@ fn join_url(base_url: &str, href: &str) -> String {
     }
 }
 
+fn build_poster_object_key(prefix: &str, category: DoubanCategory, item_id: &str) -> String {
+    let category_segment = sanitize_key_segment(category.label(), "item");
+    let item_segment = sanitize_key_segment(item_id, "unknown");
+    if prefix.is_empty() {
+        format!("{category_segment}/{item_segment}.webp")
+    } else {
+        format!("{prefix}/{category_segment}/{item_segment}.webp")
+    }
+}
+
+fn sanitize_key_prefix(raw: &str) -> String {
+    raw.split('/')
+        .map(|part| sanitize_key_segment(part, ""))
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn sanitize_key_segment(raw: &str, fallback: &str) -> String {
+    let sanitized: String = raw
+        .trim()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let sanitized = sanitized.trim_matches('_');
+    if sanitized.is_empty() {
+        fallback.to_string()
+    } else {
+        sanitized.to_string()
+    }
+}
+
 fn log_items(category: DoubanCategory, items: &[DoubanItem]) {
     let label = category.label();
     debug!(category = label, total = items.len(), "douban crawl parsed");
@@ -557,9 +848,11 @@ fn log_items(category: DoubanCategory, items: &[DoubanItem]) {
 #[cfg(test)]
 mod tests {
     use super::{
+        DoubanCategory, DoubanItem, build_poster_object_key, collect_refresh_upload_item_ids,
         map_items_for_db, parse_book_items, parse_game_items, parse_movie_items,
-        should_stop_on_existing, DoubanItem,
+        sanitize_key_prefix, sanitize_key_segment, should_stop_on_existing,
     };
+    use std::collections::HashSet;
 
     #[test]
     fn parse_movie_item() {
@@ -662,5 +955,64 @@ mod tests {
         assert!(should_stop_on_existing(0, 1));
         assert!(should_stop_on_existing(2, 3));
         assert!(!should_stop_on_existing(3, 3));
+    }
+
+    #[test]
+    fn build_poster_object_key_uses_webp_suffix() {
+        let key = build_poster_object_key("douban/posters", DoubanCategory::Movie, "123456");
+        assert_eq!(key, "douban/posters/movie/123456.webp");
+    }
+
+    #[test]
+    fn sanitize_key_prefix_drops_empty_segments() {
+        let prefix = sanitize_key_prefix("/douban//poster assets/");
+        assert_eq!(prefix, "douban/poster_assets");
+    }
+
+    #[test]
+    fn sanitize_key_segment_applies_fallback() {
+        assert_eq!(sanitize_key_segment("中文 空格", "fallback"), "fallback");
+        assert_eq!(sanitize_key_segment("abc-123", "fallback"), "abc-123");
+    }
+
+    #[test]
+    fn collect_refresh_upload_item_ids_excludes_existing_ids() {
+        let items = vec![
+            DoubanItem {
+                id: "1".to_string(),
+                tags: vec![],
+                date: None,
+                comment: None,
+                rating: None,
+                title: "Item 1".to_string(),
+                type_: "movie".to_string(),
+                poster: None,
+            },
+            DoubanItem {
+                id: "2".to_string(),
+                tags: vec![],
+                date: None,
+                comment: None,
+                rating: None,
+                title: "Item 2".to_string(),
+                type_: "movie".to_string(),
+                poster: None,
+            },
+            DoubanItem {
+                id: "2".to_string(),
+                tags: vec![],
+                date: None,
+                comment: None,
+                rating: None,
+                title: "Item 2 duplicated".to_string(),
+                type_: "movie".to_string(),
+                poster: None,
+            },
+        ];
+        let existing_ids = HashSet::from([String::from("1")]);
+        let upload_ids = collect_refresh_upload_item_ids(&items, &existing_ids);
+        assert!(upload_ids.contains("2"));
+        assert!(!upload_ids.contains("1"));
+        assert_eq!(upload_ids.len(), 1);
     }
 }

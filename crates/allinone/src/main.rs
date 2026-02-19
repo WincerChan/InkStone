@@ -49,14 +49,15 @@ async fn run() -> Result<(), AppError> {
 
     info!(%addr, "all-in-one http server starting");
 
-    let http_task = tokio::spawn(async move {
-        axum::serve(listener, router).await.map_err(AppError::from)
-    });
+    let http_task =
+        tokio::spawn(async move { axum::serve(listener, router).await.map_err(AppError::from) });
 
     let worker_state = admin_state;
     let worker_task = tokio::spawn(async move {
         info!("worker scheduler starting");
-        jobs::start(worker_state, false).await.map_err(AppError::from)
+        jobs::start(worker_state, false)
+            .await
+            .map_err(AppError::from)
     });
 
     let shutdown = shutdown_signal();
@@ -93,10 +94,10 @@ async fn build_public_state(config: PublicConfig) -> Result<AppState, AppError> 
 }
 
 fn build_router(public_state: AppState, admin_state: AdminState) -> Router<()> {
-    let public_router = inkstone_app::http::router::build(public_state.clone())
-        .with_state(public_state);
-    let admin_router = inkstone_admin_core::http::router::build(admin_state.clone())
-        .with_state(admin_state);
+    let public_router =
+        inkstone_app::http::router::build(public_state.clone()).with_state(public_state);
+    let admin_router =
+        inkstone_admin_core::http::router::build(admin_state.clone()).with_state(admin_state);
     Router::new().merge(public_router).merge(admin_router)
 }
 
@@ -108,14 +109,14 @@ async fn shutdown_signal() {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_router, build_admin_state, build_public_state};
-    use axum::http::StatusCode;
+    use super::{build_admin_state, build_public_state, build_router};
     use axum::Router;
+    use axum::http::StatusCode;
     use inkstone_runtime::config::{AdminConfig, PublicConfig};
     use reqwest::Client;
     use std::path::PathBuf;
     use tokio::net::TcpListener;
-    use tokio::time::{sleep, Duration};
+    use tokio::time::{Duration, sleep};
 
     fn temp_dir(name: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
@@ -154,6 +155,13 @@ mod tests {
             douban_uid: "1".to_string(),
             douban_cookie: "cookie".to_string(),
             douban_user_agent: "ua".to_string(),
+            douban_poster_r2_endpoint: None,
+            douban_poster_r2_bucket: None,
+            douban_poster_r2_access_key_id: None,
+            douban_poster_r2_secret_access_key: None,
+            douban_poster_r2_public_base_url: None,
+            douban_poster_r2_region: "auto".to_string(),
+            douban_poster_r2_prefix: "douban".to_string(),
             cookie_secret: Some("cookie".to_string()),
             stats_secret: Some("stats".to_string()),
             public_token_secret: Some("token".to_string()),
@@ -201,9 +209,7 @@ mod tests {
         let admin_state = build_admin_state(admin_config(index_dir.clone()))
             .await
             .unwrap();
-        let public_state = build_public_state(public_config(index_dir))
-            .await
-            .unwrap();
+        let public_state = build_public_state(public_config(index_dir)).await.unwrap();
         let router = build_router(public_state, admin_state);
 
         let public_status = status_for(router.clone(), "/v2/search").await;

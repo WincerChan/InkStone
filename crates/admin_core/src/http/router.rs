@@ -1,8 +1,8 @@
+use axum::Router;
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{HeaderValue, Method};
 use axum::middleware;
 use axum::routing::{get, post};
-use axum::Router;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
 use crate::http::middleware::admin_auth;
@@ -15,7 +15,10 @@ pub fn build(state: AdminState) -> Router<AdminState> {
         .route("/v2/admin/login", post(admin::auth::login))
         .route("/v2/admin/pulse/sites", get(admin::pulse::list_pulse_sites))
         .route("/v2/admin/pulse/site", get(admin::pulse::get_pulse_site))
-        .route("/v2/admin/pulse/active", get(admin::pulse::get_pulse_active))
+        .route(
+            "/v2/admin/pulse/active",
+            get(admin::pulse::get_pulse_active),
+        )
         .route(
             "/v2/admin/pulse/active/summary",
             get(admin::pulse::get_pulse_active_summary),
@@ -130,14 +133,14 @@ fn should_enable_cors(allow_any: bool, origins: &[HeaderValue]) -> bool {
 mod tests {
     use super::{build, is_wildcard_origin, should_enable_cors};
     use crate::state::{AdminHealthState, AdminState, ContentRefreshBackoff};
-    use axum::http::{HeaderValue, StatusCode};
     use axum::Router;
+    use axum::http::{HeaderValue, StatusCode};
     use inkstone_infra::search::SearchIndex;
     use inkstone_runtime::config::AdminConfig;
     use std::sync::Arc;
     use tokio::net::TcpListener;
     use tokio::sync::Mutex;
-    use tokio::time::{sleep, Duration};
+    use tokio::time::{Duration, sleep};
 
     fn build_state() -> AdminState {
         let suffix = std::time::SystemTime::now()
@@ -159,6 +162,13 @@ mod tests {
             douban_uid: "1".to_string(),
             douban_cookie: "cookie".to_string(),
             douban_user_agent: "ua".to_string(),
+            douban_poster_r2_endpoint: None,
+            douban_poster_r2_bucket: None,
+            douban_poster_r2_access_key_id: None,
+            douban_poster_r2_secret_access_key: None,
+            douban_poster_r2_public_base_url: None,
+            douban_poster_r2_region: "auto".to_string(),
+            douban_poster_r2_prefix: "douban".to_string(),
             cookie_secret: Some("cookie".to_string()),
             stats_secret: Some("stats".to_string()),
             public_token_secret: Some("token".to_string()),
@@ -227,6 +237,9 @@ mod tests {
     fn cors_enablement_requires_origin_or_wildcard() {
         assert!(!should_enable_cors(false, &[]));
         assert!(should_enable_cors(true, &[]));
-        assert!(should_enable_cors(false, &[HeaderValue::from_static("https://example.com")]));
+        assert!(should_enable_cors(
+            false,
+            &[HeaderValue::from_static("https://example.com")]
+        ));
     }
 }
