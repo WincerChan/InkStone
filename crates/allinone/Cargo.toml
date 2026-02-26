@@ -16,4 +16,4 @@ inkstone-infra = { path = "../infra" }
 inkstone-runtime = { path = "../runtime" }
 
 [dev-dependencies]
-reqwest = { version = "0.12", features = ["rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
